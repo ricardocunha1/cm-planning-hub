@@ -13,6 +13,7 @@ import {
   milestoneSummaryData,
   orderedFlags,
   planConnection,
+  projectLabel,
   sizeCounts,
   sizeSummary,
   sourceInfo,
@@ -159,5 +160,12 @@ describe("planConnection", () => {
   it("is null for an empty source or an empty string field", () => {
     expect(planConnection({})).toBeNull();
     expect(planConnection({ ...full, projectUrl: "" })).toBeNull();
+  });
+});
+
+describe("projectLabel", () => {
+  it("labels both project types with a middle dot", () => {
+    expect(projectLabel("onprem", "Proj")).toBe("On Prem · Proj");
+    expect(projectLabel("cloud", "Proj")).toBe("Collaboration Hub · Proj");
   });
 });

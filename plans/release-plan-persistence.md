@@ -217,6 +217,7 @@ Mounted at **`/api/plan`**. JSON in/out. Errors are always `{errors: [str]}`:
 // GET /api/plan/{id}            → 200 PlanDetail
 //   404 → { "errors": ["Release plan not found: 12."] }
 //   non-integer id → 422 (existing handler format)
+//   id outside 1..2147483647 (int4) → 404 like any unknown id (added in Phase 2; applies to PUT/DELETE too)
 
 // POST /api/plan                → 201 PlanDetail
 { "name": "…", "projectType": "onprem" | "cloud", "projectName": "…", "state": { … } }
@@ -226,7 +227,10 @@ Mounted at **`/api/plan`**. JSON in/out. Errors are always `{errors: [str]}`:
 //   - projectType not onprem|cloud → existing handler format
 //   - state not an object or state.schema != "release-planner-features" → "Plan state is not a release plan."
 //   - serialized state > 5 MiB → "Plan state is too large (max 5 MiB)."
-//   (name/projectName are stored trimmed)
+//   - U+0000 (Postgres text/jsonb can't store it; added in Phase 2), checked after the field's other rules:
+//     "Plan name contains invalid characters." / "Project name contains invalid characters." /
+//     "Plan state contains invalid characters." (any key or value, at any depth)
+//   (name/projectName are stored trimmed; at most one error per field, in the order name, projectName, state)
 
 // PUT /api/plan/{id}            → 200 PlanDetail (updatedAt = now())
 { "name": "…", "state": { … } }
@@ -332,22 +336,22 @@ Completed 2026-11-03 in 1 Develop ↔ QA cycle: `backend-developer` did the work
 - `src/client/dist/assets` is owned by root (from an older container build), so `npm run build` fails at the Vite write step until `dist` is removed. This was already the case before this work; the type-check passes.
 
 ## Phase 2: Plan API (server) and client data layer
-Status: Not started
+Status: Complete
 
 Agents in parallel: `backend-developer` (server) and `frontend-developer`
 (client data layer only, with no UI changes yet). Both get the API contract.
 
 Backend:
-- [ ] Add schemas to `app/schemas.py`: `PlanSummary`, `PlanDetail`, `PlanListResponse`, `PlanCreateRequest`, `PlanUpdateRequest` (camelCase aliases, `projectType: Literal["onprem","cloud"]`, `page: int ≥ 1`), with name/projectName/state validation producing the contract's exact messages.
-- [ ] Implement `app/services/plans.py` (repository functions over `AsyncSession`; `update_plan` sets `updated_at = func.now()`; each function returns `None`/`False` for a missing id).
-- [ ] Implement `app/api/plan_routes.py` (thin routes; 201 on POST, 204 on DELETE, 404 `{errors}` for a missing id, mapping of DB connection errors → 503 `{errors}`) and mount it in `app/main.py` at `/api/plan`.
-- [ ] Unit tests: schema validation (every 422 message, trimming, the 5 MiB limit) without a DB; repository and route tests with a DB (`db` marker): CRUD, ordering by `updatedAt` after PUT, pagination (`total`, page past the end, 10 per page with 11 rows), 404s, a PUT that ignores `projectType`, `updatedAt` > `createdAt` after PUT, and the 503 mapping (override `get_session` with a session that raises `OperationalError`/`OSError`).
+- [x] Add schemas to `app/schemas.py`: `PlanSummary`, `PlanDetail`, `PlanListResponse`, `PlanCreateRequest`, `PlanUpdateRequest` (camelCase aliases, `projectType: Literal["onprem","cloud"]`, `page: int ≥ 1`), with name/projectName/state validation producing the contract's exact messages.
+- [x] Implement `app/services/plans.py` (repository functions over `AsyncSession`; `update_plan` sets `updated_at = func.now()`; each function returns `None`/`False` for a missing id).
+- [x] Implement `app/api/plan_routes.py` (thin routes; 201 on POST, 204 on DELETE, 404 `{errors}` for a missing id, mapping of DB connection errors → 503 `{errors}`) and mount it in `app/main.py` at `/api/plan`.
+- [x] Unit tests: schema validation (every 422 message, trimming, the 5 MiB limit) without a DB; repository and route tests with a DB (`db` marker): CRUD, ordering by `updatedAt` after PUT, pagination (`total`, page past the end, 10 per page with 11 rows), 404s, a PUT that ignores `projectType`, `updatedAt` > `createdAt` after PUT, and the 503 mapping (override `get_session` with a session that raises `OperationalError`/`OSError`).
 
 Frontend:
-- [ ] Add `lib/releasePlan/planTypes.ts` (contract types) and `lib/releasePlan/planApi.ts` (`listPlans(page)`, `getPlan(id)`, `createPlan(req)`, `updatePlan(id, req)`, `deletePlan(id)`, all with `AbortSignal` support, throwing `ApiError` with the server's `errors` for 404/422/503 and handling 204). Add the needed GET/PUT/DELETE helpers next to `postJson`.
-- [ ] Add `lib/releasePlan/autosavePreference.ts` (`loadAutosave(): boolean` default `true`, `saveAutosave(on)`, key `cmPlanningHub.releasePlan.autosave.v1`, try/catch like `sidebarPreference.ts`).
-- [ ] Add `projectLabel(projectType, projectName)` → `"On Prem · X"` / `"Collaboration Hub · X"` (in `selectors.ts`).
-- [ ] Unit tests for all of the above (mocked `fetch`).
+- [x] Add `lib/releasePlan/planTypes.ts` (contract types) and `lib/releasePlan/planApi.ts` (`listPlans(page)`, `getPlan(id)`, `createPlan(req)`, `updatePlan(id, req)`, `deletePlan(id)`, all with `AbortSignal` support, throwing `ApiError` with the server's `errors` for 404/422/503 and handling 204). Add the needed GET/PUT/DELETE helpers next to `postJson`.
+- [x] Add `lib/releasePlan/autosavePreference.ts` (`loadAutosave(): boolean` default `true`, `saveAutosave(on)`, key `cmPlanningHub.releasePlan.autosave.v1`, try/catch like `sidebarPreference.ts`).
+- [x] Add `projectLabel(projectType, projectName)` → `"On Prem · X"` / `"Collaboration Hub · X"` (in `selectors.ts`).
+- [x] Unit tests for all of the above (mocked `fetch`).
 
 ### Verification Plan
 - `python3 -m compileall -q src/server/app` → exit 0.
@@ -358,7 +362,74 @@ Frontend:
   `curl -s 172.17.0.1:8080/api/plan` → `total ≥ 1`. `curl -s -o /dev/null -w '%{http_code}' -XDELETE 172.17.0.1:8080/api/plan/<id>` → `204`.
 
 ### Phase Summary
-_(write when phase completes)_
+Completed 2026-11-03 in 2 Develop ↔ QA cycles. `backend-developer` and `frontend-developer` ran in parallel. In cycle 1, `qa-engineer` found 2 Major issues; both were fixed, and in cycle 2 it found no Blocker or Major issues.
+
+**Server**
+- **`app/schemas.py`:** `PlanSummary`, `PlanDetail`, `PlanListResponse`, `PlanUpdateRequest` (extra keys ignored) and `PlanCreateRequest` (adds `projectType: Literal["onprem","cloud"]` and `projectName`). Aliases are camelCase.
+- **`app/services/plans.py`:**
+  - Constants: `PLAN_PAGE_SIZE=10`, `PLAN_STATE_MAX_BYTES=5 MiB` (the UTF-8 length of `json.dumps(state)`; exactly 5 MiB passes) and `MAX_PLAN_ID=2147483647`, plus the message constants.
+  - `plan_field_errors(data, with_project=…)` returns the contract's exact messages, at most one per field, in the order name, projectName, state.
+  - The NUL check walks the state iteratively, so deep nesting is safe, and a literal `\u0000` text is not flagged.
+  - Repository functions `list_plans`, `get_plan`, `create_plan`, `update_plan` (sets `updated_at = func.now()`) and `delete_plan`.
+  - Out-of-range ids return `None`/`False` without a query.
+  - Timestamps are returned as UTC.
+- **`app/api/plan_routes.py`, how 422s work:**
+  - POST and PUT read the raw body and run `plan_field_errors`, the same pattern as the ADO routes. Any errors → `422 {errors}`.
+  - Otherwise the body is validated with the pydantic model. A `ValidationError` there, such as a bad `projectType`, is re-raised as `RequestValidationError`, so it uses the existing `Invalid request: body.projectType: …` format.
+  - The custom checks run first, so a custom error hides a bad `projectType`.
+  - The path parameter is named `plan_id`, so a non-integer id gives `Invalid request: path.plan_id: …`.
+- **`app/api/plan_routes.py`, how 503s work:**
+  - A custom `PlanRoute` route class wraps the whole handler, including dependency resolution.
+  - It maps `OperationalError`, `InterfaceError`, `OSError` and `asyncpg.PostgresConnectionError` → 503 `The release plan database is unavailable.`.
+  - Bare `OSError` is kept on purpose: connect-time failures arrive as many different `OSError` subclasses.
+- **Mounting:** `app/main.py` mounts the router at `/api/plan`. `/api/health` stays DB-independent.
+- **Note for tests:** FastAPI resolves `get_session` before the route body runs. A no-DB route test that expects a 422 or a 404 must override `get_session` with a dummy session, otherwise it hits the 503 path.
+- **QA cycle 1 Majors (fixed):**
+  - An id > int4 caused an asyncpg `DataError`, so the route returned 500. Now it returns 404.
+  - U+0000 in `name`, `projectName` or `state` was rejected by Postgres with a 500. Now it returns 422 with the new messages.
+  - Both rules were added to the API contract above.
+
+**Client** (`src/client/src/lib`)
+- **`releasePlan/planTypes.ts`:** the contract types. `PlanDetail.state` is **`unknown`** (not normalized), so Phase 4 must run `normalizePlan` on it. The request `state` is `ReleasePlan`.
+- **`releasePlan/planApi.ts`:** `listPlans(page)`, `getPlan`, `createPlan`, `updatePlan` and `deletePlan`.
+  - Each takes an `AbortSignal`.
+  - Errors are `ApiError` with the server's `errors` and `status`; an `AbortError` is rethrown unchanged.
+- **`ado/api.ts`:** `getJson`, `putJson` and `deleteRequest` added next to `postJson`. There is no `lib/http.ts`.
+- **`monteCarlo/api.ts`:** `request` returns `undefined` on 204, without reading the body.
+- **`releasePlan/autosavePreference.ts`:** `AUTOSAVE_KEY`, `loadAutosave()` (only `"off"` reads as false) and `saveAutosave(on)`, both inside try/catch.
+- **`releasePlan/selectors.ts`:** `projectLabel(type, name)` returns `"On Prem · X"` or `"Collaboration Hub · X"`.
+
+**Tests**
+- **Server unit tests (developer):**
+  - `test_plan_validation.py`: 37, no DB.
+  - `test_plans_service.py`: 5, DB.
+  - `test_plan_routes.py`: 34, mostly no DB with a dummy-session override, plus DB CRUD, pagination and 404 tests.
+- **Server integration tests (QA):** `test_plan_integration.py`, 19, DB. It covers:
+  - Lifecycle with a realistic unicode board round trip, and pagination and reordering after PUTs.
+  - Nothing is persisted on a 422, and the size and length boundaries.
+  - A deleted plan gives 404.
+  - Concurrent PUTs (last write wins, name and state from the same write) and concurrent POSTs.
+  - 503 on all five routes against a real unreachable DB (127.0.0.1:1).
+  - Out-of-range ids give 404, and NUL gives 422.
+- **Client unit tests (developer):** `planApi.test.ts` (6), `autosavePreference.test.ts` (4), plus 1 each in `selectors.test.ts`, `monteCarlo/api.test.ts` and `ado/api.test.ts`.
+- **Client integration tests (QA):** `planApi.integration.test.ts` (3): `planApi` against a fake server for the full CRUD flow then 404; `ApiError` messages come through verbatim.
+
+**Verification (re-run by the main session)**
+- `compileall`: OK.
+- `pytest` without a DB: 831 passed, 41 skipped. The baseline was 766 / 11.
+- `pytest` with `TEST_DATABASE_URL`: 871 passed, 1 skipped (`test_ado_live`). The baseline was 776 / 1.
+- `npx tsc -b`: OK. The Vite build to an alternate `--outDir` is OK (see the environment note).
+- `npm test -- --run`: 79 files, 842 tests passed. The baseline was 76 files / 823 tests.
+- Smoke test with `docker compose up -d --build` through nginx: POST → 201 with an `id`, GET list → `total` ≥ 1, `/api/plan/99999999999` → 404, DELETE → 204.
+
+**Open Minor findings (not blocking)**
+1. The bare `OSError` in `PlanRoute`'s `DB_ERRORS` would also report an unrelated `OSError` as 503. It is kept for the reason given above; a comment explaining why would help.
+2. The generic 500 text ("…review your input historical data.") is Monte Carlo wording and misleading on `/api/plan`. No known input reaches it now.
+3. The DB tests `TRUNCATE` the shared `planninghub` database, which wipes the compose stack's plans and leaves test rows behind. This was accepted in *Decisions*.
+
+**Environment notes**
+- `npm run build` still fails only at Vite's write step, because `src/client/dist/assets` is owned by root. This predates the work; delete `dist` to fix it.
+- The full Vitest suite is occasionally flaky under load: a different 1–3 UI integration tests time out on each run, none in changed code, and they pass in isolation and on a re-run.
 
 ## Phase 3: Plan list and create-with-name (client)
 Status: Not started

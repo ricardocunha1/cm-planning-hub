@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.api.ado_routes import router as ado_router
+from app.api.plan_routes import router as plan_router
 from app.api.routes import router
 from app.config import get_settings
 from app.db import dispose_engine, migrate_to_head, wait_for_database
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
 
     app.include_router(router, prefix="/api")
     app.include_router(ado_router, prefix="/api/ado")
+    app.include_router(plan_router, prefix="/api/plan")
     return app
 
 

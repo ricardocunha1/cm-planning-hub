@@ -1,4 +1,5 @@
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -188,3 +189,48 @@ class AdoSprintHistoryResponse(BaseModel):
     fetched_at: str = Field(alias="fetchedAt")
     work_items: list[AdoSprintHistoryItem] = Field(alias="workItems")
     warnings: list[str]
+
+
+PlanProjectType = Literal["onprem", "cloud"]
+
+
+class PlanSummary(BaseModel):
+    """A stored Release Plan without its board (list item)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    name: str
+    project_type: PlanProjectType = Field(alias="projectType")
+    project_name: str = Field(alias="projectName")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class PlanDetail(PlanSummary):
+    state: dict[str, Any]
+
+
+class PlanListResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    items: list[PlanSummary]
+    total: int
+    page: int
+    page_size: int = Field(alias="pageSize")
+
+
+class PlanUpdateRequest(BaseModel):
+    """`PUT /api/plan/{id}` body. Extra keys (e.g. `projectType`) are ignored.
+    The routes read the body manually and run `plan_field_errors` first so the
+    422 messages are the contract's own."""
+
+    name: str
+    state: dict[str, Any]
+
+
+class PlanCreateRequest(PlanUpdateRequest):
+    model_config = ConfigDict(populate_by_name=True)
+
+    project_type: PlanProjectType = Field(alias="projectType")
+    project_name: str = Field(alias="projectName")

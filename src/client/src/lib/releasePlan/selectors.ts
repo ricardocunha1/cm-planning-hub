@@ -1,6 +1,7 @@
 import type { AdoConnection } from "./adoTypes";
 import { DONE_STATES, SIZES } from "./constants";
 import { NO_EPIC_ID, type Band, type Epic, type Feature, type Flag, type Milestone, type PlanSource, type ReleasePlan } from "./types";
+import type { PlanProjectType } from "./planTypes";
 
 /** Milestones in order, then the synthetic Unplanned band. */
 export function bands(plan: ReleasePlan): Band[] {
@@ -244,4 +245,9 @@ export function featureTooltip(f: Feature): string {
 export function planConnection(source: PlanSource): AdoConnection | null {
   const { kind, projectUrl, scopeType, scopePath } = source;
   return kind && projectUrl && scopeType && scopePath ? { source: kind, projectUrl, scopeType, scopePath } : null;
+}
+
+/** Human label of a saved plan's project: `"On Prem · X"` or `"Collaboration Hub · X"`. */
+export function projectLabel(projectType: PlanProjectType, projectName: string): string {
+  return `${projectType === "onprem" ? "On Prem" : "Collaboration Hub"} · ${projectName}`;
 }

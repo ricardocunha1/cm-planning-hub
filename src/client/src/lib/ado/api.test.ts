@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeConnectResponse } from "../../test/adoFixtures";
 import { ApiError } from "../monteCarlo/api";
-import { adoConnect, postJson } from "./api";
+import { adoConnect, deleteRequest, getJson, postJson, putJson } from "./api";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const REQ = { source: "cloud", projectUrl: "https://dev.azure.com/o/P", pat: "pat-1" } as const;
@@ -40,5 +40,22 @@ describe("ado api", () => {
     const error = await adoConnect(REQ, new AbortController().signal).catch((exc: unknown) => exc);
     expect(error).toBe(abort);
     expect(error).not.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("getJson / putJson / deleteRequest", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("use the right method, headers and body", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(json({ ok: true })));
+    vi.stubGlobal("fetch", fetchMock);
+    await getJson("/g");
+    await putJson("/p", { a: 1 });
+    expect(fetchMock.mock.calls[0]).toEqual(["/g", { method: "GET", signal: undefined }]);
+    const [, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(init).toMatchObject({ method: "PUT", headers: { "Content-Type": "application/json" }, body: '{"a":1}' });
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(deleteRequest("/d")).resolves.toBeUndefined();
+    expect((fetchMock.mock.calls[2] as [string, RequestInit])[1].method).toBe("DELETE");
   });
 });

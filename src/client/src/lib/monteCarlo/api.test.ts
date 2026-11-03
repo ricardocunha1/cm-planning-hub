@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeSprintHistory } from "../../test/monteCarloFixtures";
-import { ApiError, adoSprintHistory, simulate } from "./api";
+import { ApiError, adoSprintHistory, request, simulate } from "./api";
 
 function respondWith(body: string, status: number, contentType = "application/json") {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status, headers: { "Content-Type": contentType } })));
@@ -74,5 +74,14 @@ describe("adoSprintHistory", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).errors).toEqual(["Choose an Iteration path."]);
     expect((error as ApiError).status).toBe(422);
+  });
+});
+
+describe("request 204", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("resolves to undefined for a 204 without parsing a body", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
+    await expect(request<void>("/x", { method: "DELETE" })).resolves.toBeUndefined();
   });
 });

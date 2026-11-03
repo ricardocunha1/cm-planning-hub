@@ -64,8 +64,9 @@ function extractErrorMessages(body: unknown, text: string): string[] {
 /**
  * `fetch` + JSON parse; a non-2xx response becomes an {@link ApiError} with the
  * server's messages, a network failure an `ApiError` with status 0. An aborted
- * request (`init.signal`) rethrows the fetch's `AbortError` unchanged. Shared
- * with the Azure DevOps clients (`lib/ado/api.ts`).
+ * request (`init.signal`) rethrows the fetch's `AbortError` unchanged. A 204
+ * resolves to `undefined`. Shared
+ * with the Azure DevOps and plan clients (`lib/ado/api.ts`).
  */
 export async function request<T>(url: string, init: RequestInit): Promise<T> {
   let response: Response;
@@ -76,6 +77,11 @@ export async function request<T>(url: string, init: RequestInit): Promise<T> {
       throw exc;
     }
     throw new ApiError([`Could not reach the server: ${(exc as Error).message}`], 0);
+  }
+
+  if (response.status === 204) {
+    // No Content (e.g. DELETE): there is no body to parse.
+    return undefined as T;
   }
 
   const text = await response.text().catch(() => "");
