@@ -1,12 +1,12 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { createMemoryRouter, Outlet, RouterProvider, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
+import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
-import { savePlan } from "./lib/releasePlan/storage";
 import { SIDEBAR_COLLAPSED_KEY } from "./lib/sidebarPreference";
 import { ForecastProvider } from "./monteCarloStore";
+import { stubPlanServer } from "./test/planServer";
 import { samplePlan } from "./test/releasePlanFixtures";
 
 // Collapsible sidebar, full-app integration: the real App routes and pages
@@ -21,13 +21,24 @@ function LocationProbe() {
 }
 
 function renderApp(path = "/") {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <>
+            <Outlet />
+            <LocationProbe />
+          </>
+        ),
+        children: appRoutes,
+      },
+    ],
+    { initialEntries: [path] },
+  );
   return render(
     <ToastProvider>
       <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <LocationProbe />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ForecastProvider>
     </ToastProvider>,
   );
@@ -80,6 +91,7 @@ describe("Sidebar collapse – full app", () => {
   });
   afterEach(() => {
     window.localStorage.clear();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -149,11 +161,12 @@ describe("Sidebar collapse – full app", () => {
   it(
     "keeps the Release Plan board usable and highlighted with the collapsed sidebar",
     async () => {
-      savePlan(samplePlan());
+      stubPlanServer(samplePlan());
       window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "1");
       const user = userEvent.setup();
-      renderApp("/release-plan/board");
-      expect(location()).toBe("/release-plan/board");
+      renderApp("/release-plan/1");
+      await screen.findByRole("region", { name: "Milestone summary" }, { timeout: 5_000 });
+      expect(location()).toBe("/release-plan/1");
       expectCollapsed();
       expectActive("Release Plan", "Monte Carlo");
       expect(screen.getByRole("button", { name: "Sync from ADO" })).toBeInTheDocument();

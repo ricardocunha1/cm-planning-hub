@@ -239,7 +239,7 @@ export function featureTooltip(f: Feature): string {
 
 /**
  * The Azure DevOps connection a plan is linked to (written when the board is
- * created from, or synced with, ADO and kept by Save/Load Plan JSON), or `null`
+ * created from, or synced with, ADO and stored with the saved plan), or `null`
  * when `source` lacks any of `kind`, `projectUrl`, `scopeType`, `scopePath`.
  */
 export function planConnection(source: PlanSource): AdoConnection | null {

@@ -172,7 +172,7 @@ describe("PlanList", () => {
     expect(await screen.findByRole("link", { name: "Plan 1" })).toBeInTheDocument();
   });
 
-  it("shows an error toast with the server message when the delete fails, and keeps the list", async () => {
+  it("shows an error toast with the server message when the delete fails, and refetches the list", async () => {
     const user = userEvent.setup();
     listMock.mockResolvedValue(response([summary(1)]));
     deleteMock.mockRejectedValue(new ApiError(["Release plan not found: 1."], 404));
@@ -183,6 +183,19 @@ describe("PlanList", () => {
     expect(alert).toHaveTextContent("Release plan not found: 1.");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Plan 1" })).toBeInTheDocument();
-    expect(listMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("moves to the last page when a page past the end comes back empty although plans exist", async () => {
+    const user = userEvent.setup();
+    listMock.mockImplementation(async (page) => response([summary(1)], 45, page));
+    renderList();
+    await user.click(await screen.findByRole("button", { name: "Next" }));
+    // Rows were deleted elsewhere: only one page is left, so page 2 is past the end.
+    listMock.mockImplementation(async (page) => (page === 1 ? response([summary(7)], 5, 1) : response([], 5, page)));
+    await user.click(await screen.findByRole("button", { name: "Next" }));
+    expect(await screen.findByRole("link", { name: "Plan 7" })).toBeInTheDocument();
+    expect(screen.queryByText(/No saved release plans yet/)).not.toBeInTheDocument();
+    expect(listMock).toHaveBeenLastCalledWith(1, expect.any(AbortSignal));
   });
 });

@@ -3,11 +3,11 @@
 // only `fetch` is mocked at the network boundary (synthetic responses, never a real Azure DevOps).
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { createMemoryRouter, Outlet, RouterProvider, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../App";
+import { appRoutes } from "../App";
 import { ToastProvider } from "../components/Toast";
-import { ADO_CONNECTION_KEY, STORAGE_KEY } from "../lib/releasePlan/constants";
+import { ADO_CONNECTION_KEY } from "../lib/releasePlan/constants";
 import type { ReleasePlan } from "../lib/releasePlan/types";
 import { normalizePlan } from "../lib/releasePlan/validate";
 import { ForecastProvider } from "../monteCarloStore";
@@ -30,13 +30,24 @@ function LocationProbe() {
 }
 
 function renderApp(path: string) {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <>
+            <Outlet />
+            <LocationProbe />
+          </>
+        ),
+        children: appRoutes,
+      },
+    ],
+    { initialEntries: [path] },
+  );
   return render(
     <ToastProvider>
       <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <LocationProbe />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ForecastProvider>
     </ToastProvider>,
   );
@@ -69,12 +80,17 @@ function mockNetwork(
 ) {
   const held: Deferred[] = [];
   const signals: (AbortSignal | undefined)[] = [];
+  let created: Record<string, unknown> | null = null;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     signals.push(init?.signal ?? undefined);
     if (url === "/api/plan") {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return json({ id: 42, ...body, createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z" }, 201);
+      created = { id: 42, ...body, createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z" };
+      return json(created, 201);
+    }
+    if (url === "/api/plan/42" && created) {
+      return json(created);
     }
     const route = url === "/api/ado/connect" ? "connect" : url === "/api/ado/backlog" ? "backlog" : "other";
     if (route === "other") {
@@ -105,10 +121,6 @@ function allLocalStorage(): string {
     .join("\n");
 }
 
-function storedPlan(): ReleasePlan | null {
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  return raw ? (JSON.parse(raw) as ReleasePlan) : null;
-}
 
 async function openAdoFromHome(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /Create from Azure DevOps/ }));
@@ -217,10 +229,9 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect(calls[2][0]).toBe("/api/plan");
     expect(JSON.parse(String(calls[2][1].body))).toMatchObject({ name: "My Proj – Feature Release Plan", projectType: "onprem", projectName: "My Proj" });
 
-    // Persistence: the plan (with the connection in source) and the connection; the PAT nowhere.
-    const saved = storedPlan();
-    expect(saved).not.toBeNull();
-    expect(saved!.source).toEqual({
+    // Persistence: the plan (with the connection in source) is POSTed and the connection remembered; the PAT is stored nowhere.
+    const saved = (JSON.parse(String(calls[2][1].body)) as { state: ReleasePlan }).state;
+    expect(saved.source).toEqual({
       system: "Azure DevOps",
       project: "My Proj",
       scope: "Iteration Path: Proj\\Phase 1\\Sprint 02",
@@ -240,11 +251,10 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect(wi).toHaveTextContent("No description in Azure DevOps.");
     await user.keyboard("{Escape}");
 
-    // "Reload": a fresh App restores the board from localStorage; the modal is pre-filled without the PAT.
+    // "Reload": a fresh App loads the board from the server; the modal is pre-filled without the PAT.
     view.unmount();
-    renderApp("/release-plan/board");
-    expect(screen.getByLabelText("Plan name")).toHaveValue("My Proj – Feature Release Plan");
-    await waitFor(() => expect(toastTexts().some((t) => t.includes("Restored your last session"))).toBe(true));
+    renderApp("/release-plan/42");
+    expect(await screen.findByLabelText("Plan name", undefined, FIND)).toHaveValue("My Proj – Feature Release Plan");
     await user.click(within(screen.getByRole("navigation", { name: "Hub navigation" })).getByRole("link", { name: "Release Plan" }));
     expect(location()).toBe("/release-plan");
     await openAdoFromHome(user);
@@ -291,7 +301,7 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
 
   it("closing the modal (Esc) while work items load aborts the request: no plan, no navigation, no toast", async () => {
     const user = userEvent.setup();
-    const { held, signals } = mockNetwork({ hold: "backlog" });
+    const { held, signals, fetchMock } = mockNetwork({ hold: "backlog" });
     renderApp("/release-plan");
     const card = screen.getByRole("button", { name: /Create from Azure DevOps/ });
     await openAdoFromHome(user);
@@ -307,7 +317,7 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect(signals[1]?.aborted).toBe(true);
     await act(async () => held[0].resolve(json(makeBacklog())));
     expect(location()).toBe("/release-plan");
-    expect(storedPlan()).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/plan")).toBe(false);
     expect(toastTexts().some((t) => t.includes("Plan created"))).toBe(false);
     expect(card).toHaveFocus();
 
@@ -320,7 +330,7 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
 
   it("shows a backlog 422 inline, keeps the modal, path and PAT, and creates nothing", async () => {
     const user = userEvent.setup();
-    mockNetwork({ backlog: () => json({ errors: ["Unknown Iteration path: Proj\\Phase 1\\Sprint 02."] }, 422) });
+    const { fetchMock } = mockNetwork({ backlog: () => json({ errors: ["Unknown Iteration path: Proj\\Phase 1\\Sprint 02."] }, 422) });
     renderApp("/release-plan");
     await openAdoFromHome(user);
     await fillConnection(user);
@@ -332,7 +342,7 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect(within(adoDialog()).getByTestId("ado-selected-path")).toHaveTextContent("Proj\\Phase 1\\Sprint 02");
     expect(within(adoDialog()).getByRole("button", { name: "Create board" })).toBeEnabled();
     expect(location()).toBe("/release-plan");
-    expect(storedPlan()).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/plan")).toBe(false);
   });
 
   it("shows a Connect 422 (PAT rejected) and a network failure inline, without a tree", async () => {

@@ -1,36 +1,16 @@
-import { render, screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
-import { ToastProvider } from "./components/Toast";
-import { STORAGE_KEY } from "./lib/releasePlan/constants";
-import { ForecastProvider } from "./monteCarloStore";
+import { disableAutosave, stubPlanServer } from "./test/planServer";
+import { renderApp } from "./test/renderApp";
 
-// Release Plan full-app integration (Phase 1): the real App (whose
-// ReleasePlanProvider autosaves to the real jsdom localStorage), real pages and
-// components. Nothing is mocked; a "reload" is an unmount + a fresh render that
-// re-hydrates from the same localStorage. Synthetic data only.
+// Release Plan full-app integration (Phase 1): the real App routes, real pages
+// and components; only `fetch` is faked (a one-plan `/api/plan/1` server). A
+// "reload" is an unmount + a fresh render that loads the plan from the server
+// again. Synthetic data only.
 
 const FLOW_TIMEOUT_MS = 20_000;
 const FIND = { timeout: 5_000 };
-
-function LocationProbe() {
-  return <div data-testid="location">{useLocation().pathname}</div>;
-}
-
-function renderApp(path = "/") {
-  return render(
-    <ToastProvider>
-      <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <LocationProbe />
-        </MemoryRouter>
-      </ForecastProvider>
-    </ToastProvider>,
-  );
-}
 
 const location = () => screen.getByTestId("location").textContent;
 
@@ -84,29 +64,29 @@ function summaryBox(name: string) {
   return within(screen.getByRole("region", { name: "Milestone summary" })).getByRole("group", { name });
 }
 
-function savedPlan(): { name: string; milestones: Array<{ id: string; color: string }>; epics: Array<{ features: Array<{ id: number; milestoneId: string | null; size: string }> }> } {
-  return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
-}
+type SavedPlan = { name: string; milestones: Array<{ id: string; color: string }>; epics: Array<{ features: Array<{ id: number; milestoneId: string | null; size: string }> }> };
 
 describe("Release Plan – full app flow (Phase 1)", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    disableAutosave();
     vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   });
   afterEach(() => {
     window.localStorage.clear();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   it(
-    "saved plan → board summary → Table milestone change → reload restores the plan",
+    "saved plan → board summary → Table milestone change → save → reload restores the plan",
     async () => {
       const user = userEvent.setup();
-      // Seed the autosave with the synthetic plan (raw, un-normalized) and open the board.
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(RAW_PLAN));
-      const first = renderApp("/release-plan/board");
+      // The server holds the synthetic plan (raw, un-normalized); open its board.
+      const server = stubPlanServer(RAW_PLAN);
+      const first = renderApp("/release-plan/1");
       expect(await screen.findByRole("region", { name: "Milestone summary" }, FIND)).toBeInTheDocument();
-      expect(location()).toBe("/release-plan/board");
+      expect(location()).toBe("/release-plan/1");
       expect(document.title).toBe("Planning Hub – Release Plan – Board");
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "Plan name" })).toHaveValue("Integration Plan");
@@ -127,13 +107,6 @@ describe("Release Plan – full app flow (Phase 1)", () => {
         expect(screen.getByText(`Feature #${id}`)).toBeInTheDocument();
       }
 
-      // Autosaved immediately, normalized.
-      const saved = savedPlan();
-      expect(saved.name).toBe("Integration Plan");
-      expect(saved.milestones.map((m) => m.color)).toEqual(["#4E98D1", "#60C5B5"]);
-      expect(saved.epics[0].features[0].size).toBe("M");
-      expect(saved.epics[1].features[1].milestoneId).toBeNull();
-
       // Switch to Table: zoom controls go away, all 4 Features are listed.
       await user.click(screen.getByRole("tab", { name: "Table" }));
       expect(screen.getByRole("tab", { name: "Table" })).toHaveAttribute("aria-selected", "true");
@@ -150,14 +123,22 @@ describe("Release Plan – full app flow (Phase 1)", () => {
       expect(summaryBox("Unplanned")).toHaveTextContent("0 Features");
       expect(summaryBox("Unplanned")).toHaveTextContent("No features");
       expect(summaryBox("Unplanned")).toHaveTextContent("Epics with unplanned features: 0");
-      expect(savedPlan().epics[1].features[1].milestoneId).toBe("ms_beta");
+      expect(screen.getByTestId("save-status")).toHaveTextContent("Unsaved changes");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(screen.getByTestId("save-status")).toHaveTextContent("Saved"));
+      // Saved normalized, with the move.
+      expect(server.puts).toHaveLength(1);
+      const saved = server.puts[0].state as SavedPlan;
+      expect(server.puts[0].name).toBe("Integration Plan");
+      expect(saved.milestones.map((m) => m.color)).toEqual(["#4E98D1", "#60C5B5"]);
+      expect(saved.epics[0].features[0].size).toBe("M");
+      expect(saved.epics[1].features[1].milestoneId).toBe("ms_beta");
 
       // "Reload": throw the whole app away and mount it again on the board URL.
       first.unmount();
-      renderApp("/release-plan/board");
-      expect(location()).toBe("/release-plan/board");
-      expect(await screen.findByText("Restored your last session", undefined, FIND)).toBeInTheDocument();
-      expect(screen.getByRole("textbox", { name: "Plan name" })).toHaveValue("Integration Plan");
+      renderApp("/release-plan/1");
+      expect(await screen.findByRole("textbox", { name: "Plan name" }, FIND)).toHaveValue("Integration Plan");
+      expect(location()).toBe("/release-plan/1");
       // UI-only state is not persisted: back on the Board view.
       expect(screen.getByRole("tab", { name: "Board" })).toHaveAttribute("aria-selected", "true");
       expect(summaryBox("Beta")).toHaveTextContent("2 Features");
@@ -171,16 +152,8 @@ describe("Release Plan – full app flow (Phase 1)", () => {
     FLOW_TIMEOUT_MS,
   );
 
-  it("redirects /release-plan/board to /release-plan when nothing is saved", () => {
+  it("redirects the old /release-plan/board URL to /release-plan", () => {
     renderApp("/release-plan/board");
     expect(location()).toBe("/release-plan");
-    expect(screen.queryByText("Restored your last session")).not.toBeInTheDocument();
-  });
-
-  it("ignores a corrupt autosave (redirects, no toast)", () => {
-    window.localStorage.setItem(STORAGE_KEY, "{not json");
-    renderApp("/release-plan/board");
-    expect(location()).toBe("/release-plan");
-    expect(screen.queryByText("Restored your last session")).not.toBeInTheDocument();
   });
 });

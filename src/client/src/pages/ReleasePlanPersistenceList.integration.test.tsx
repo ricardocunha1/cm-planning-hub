@@ -2,9 +2,9 @@
 // Real App routes, pages and components, real planApi/api.ts; only `fetch` is mocked at the network boundary.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { createMemoryRouter, Outlet, RouterProvider, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../App";
+import { appRoutes } from "../App";
 import { ToastProvider } from "../components/Toast";
 import type { PlanSummary } from "../lib/releasePlan/planTypes";
 import { ForecastProvider } from "../monteCarloStore";
@@ -20,13 +20,24 @@ function LocationProbe() {
 }
 
 function renderApp(path: string) {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <>
+            <Outlet />
+            <LocationProbe />
+          </>
+        ),
+        children: appRoutes,
+      },
+    ],
+    { initialEntries: [path] },
+  );
   return render(
     <ToastProvider>
       <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <LocationProbe />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ForecastProvider>
     </ToastProvider>,
   );

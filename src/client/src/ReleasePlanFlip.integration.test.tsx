@@ -1,15 +1,13 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
-import { ToastProvider } from "./components/Toast";
-import { L, STORAGE_KEY } from "./lib/releasePlan/constants";
+import { L } from "./lib/releasePlan/constants";
 import { computeFlippedLayout, computeLayout } from "./lib/releasePlan/layout";
 import { PNG_HEAD } from "./lib/releasePlan/png";
 import { normalizePlan } from "./lib/releasePlan/validate";
-import { ForecastProvider } from "./monteCarloStore";
 import { FakeImage, RecordingContext, stubCanvas } from "./test/canvas";
+import { disableAutosave, stubPlanServer } from "./test/planServer";
+import { renderApp } from "./test/renderApp";
 import { fireDnd, flushDragTick, mockDataTransfer, stubRects } from "./test/dnd";
 
 // Release Plan "Flip board" (QA integration): the real App with its real
@@ -30,23 +28,6 @@ const BELOW = 80;
 // Flipped columns / standard bands, in order.
 const ALPHA = 0;
 const BETA = 1;
-
-function LocationProbe() {
-  return <div data-testid="location">{useLocation().pathname}</div>;
-}
-
-function renderApp(path = "/") {
-  return render(
-    <ToastProvider>
-      <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <LocationProbe />
-        </MemoryRouter>
-      </ForecastProvider>
-    </ToastProvider>,
-  );
-}
 
 const PLAN = {
   schema: "release-planner-features",
@@ -96,14 +77,20 @@ const summaryCount = (name: string) =>
 const highlighted = () => board().querySelectorAll(".valid, .invalid, .over, .dropT, .dropB, .dropL, .dropR, .dragging");
 
 type Saved = { epics: Array<{ id: number; features: Array<{ id: number; milestoneId: string | null }> }> } & Record<string, unknown>;
-function savedPlan(): Saved {
-  return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
+let server: ReturnType<typeof stubPlanServer>;
+
+/** Saves with the Save button (autosave is off in these tests) and returns what the server received last. */
+async function savedPlan(user: ReturnType<typeof userEvent.setup>): Promise<Saved> {
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.getByTestId("save-status")).toHaveTextContent("Saved"));
+  return server.puts[server.puts.length - 1].state as Saved;
 }
 
-/** Seeds the autosave with PLAN and opens the board (a saved plan is no longer imported from a JSON file). */
+/** The server holds PLAN (autosave off, so tests save explicitly); opens its board. */
 function openBoard(): ReturnType<typeof renderApp> {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(PLAN));
-  return renderApp("/release-plan/board");
+  server = stubPlanServer(PLAN);
+  disableAutosave();
+  return renderApp("/release-plan/1");
 }
 
 /** Drags a Feature card and drops it on `target` at (`clientX`, `clientY`). */
@@ -147,16 +134,15 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
       const user = userEvent.setup();
       const first = openBoard();
       await screen.findByRole("region", { name: "Milestone summary" }, FIND);
-      expect(screen.getByTestId("location")).toHaveTextContent("/release-plan/board");
+      expect(screen.getByTestId("location")).toHaveTextContent("/release-plan/1");
       expect(flipButton()).toHaveAttribute("aria-pressed", "false");
       expect(isFlipped()).toBe(false);
-      const savedBefore = window.localStorage.getItem(STORAGE_KEY);
 
       await user.click(flipButton());
       expect(flipButton()).toHaveAttribute("aria-pressed", "true");
       expect(isFlipped()).toBe(true);
-      // Flipping is UI-only: storage is byte-for-byte unchanged.
-      expect(window.localStorage.getItem(STORAGE_KEY)).toBe(savedBefore);
+      // Flipping is UI-only: the plan has nothing to save.
+      expect(screen.getByTestId("save-status")).toHaveTextContent("Saved");
 
       // Drag "Export" right into the Beta column of its own row (clientY irrelevant on its own row).
       const own = await dragFeature(1002, cell(1002, BETA), RIGHT, BELOW);
@@ -169,7 +155,7 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
       expect(cell(1002, ALPHA).querySelector(".fcard")).toBeNull();
       expect(summaryCount("Alpha")).toBe("1");
       expect(summaryCount("Beta")).toBe("2");
-      expect(savedPlan().epics[0].features.map((f) => [f.id, f.milestoneId])).toEqual([
+      expect((await savedPlan(user)).epics[0].features.map((f) => [f.id, f.milestoneId])).toEqual([
         [1001, "ms_alpha"],
         [1002, "ms_beta"],
       ]);
@@ -177,7 +163,7 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
       // A drop on another Epic's row is refused.
       const other = await dragFeature(1003, cell(1001, ALPHA), LEFT, ABOVE);
       expect(other.accepted).toBe(false);
-      expect(savedPlan().epics[1].features[0].milestoneId).toBe("ms_beta");
+      expect((await savedPlan(user)).epics[1].features[0].milestoneId).toBe("ms_beta");
 
       // Table shows the move; the orientation survives Table → Board.
       await user.click(screen.getByRole("tab", { name: "Table" }));
@@ -189,12 +175,12 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
       expect(cell(1002, BETA).querySelector(".fcard")).not.toBeNull();
 
       // Nothing orientation-related is stored in the plan.
-      expect(JSON.stringify(savedPlan())).not.toMatch(/orientation|flipped/i);
+      expect(JSON.stringify((await savedPlan(user)))).not.toMatch(/orientation|flipped/i);
 
       // "Reload": the move is restored, the board is standard again.
       first.unmount();
-      renderApp("/release-plan/board");
-      expect(await screen.findByText("Restored your last session", undefined, FIND)).toBeInTheDocument();
+      renderApp("/release-plan/1");
+      await screen.findByRole("region", { name: "Milestone summary" }, FIND);
       expect(isFlipped()).toBe(false);
       expect(flipButton()).toHaveAttribute("aria-pressed", "false");
       expect(cell(1002, BETA).querySelector(".fcard")).not.toBeNull();
@@ -216,7 +202,7 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
       expect(re.accepted).toBe(true);
       expect(re.classes).toContain("dropT");
       expect(featureOrder(101)).toEqual(["1002", "1001"]);
-      expect(savedPlan().epics[0].features.map((f) => [f.id, f.milestoneId])).toEqual([
+      expect((await savedPlan(user)).epics[0].features.map((f) => [f.id, f.milestoneId])).toEqual([
         [1002, "ms_beta"],
         [1001, "ms_alpha"],
       ]);
@@ -226,12 +212,12 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
       expect(ep).toContain("dropT");
       expect(ep).not.toContain("dropR");
       expect(epicTitles()).toEqual(["Epic Two", "Epic One"]);
-      expect(savedPlan().epics.map((e) => e.id)).toEqual([102, 101]);
+      expect((await savedPlan(user)).epics.map((e) => e.id)).toEqual([102, 101]);
 
       // ▼ on Epic Two moves it back down (moveEpic).
       await user.click(within(epicEl(102)).getByRole("button", { name: "Move Epic down" }));
       expect(epicTitles()).toEqual(["Epic One", "Epic Two"]);
-      expect(savedPlan().epics.map((e) => e.id)).toEqual([101, 102]);
+      expect((await savedPlan(user)).epics.map((e) => e.id)).toEqual([101, 102]);
 
       // Flip back: the hook reads the orientation through a ref — the side must follow clientX now.
       await user.click(flipButton());
@@ -245,7 +231,7 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
       expect(sre.classes).toContain("dropR");
       expect(sre.classes).not.toContain("dropT");
       expect(featureOrder(101)).toEqual(["1001", "1002"]);
-      expect(savedPlan().epics[1].features.map((f) => [f.id, f.milestoneId])).toEqual([
+      expect((await savedPlan(user)).epics[1].features.map((f) => [f.id, f.milestoneId])).toEqual([
         [1001, "ms_alpha"],
         [1002, "ms_alpha"],
       ]);
@@ -259,7 +245,7 @@ describe("Release Plan – Flip board + Export PNG through the app (QA)", () => 
 
   beforeEach(() => {
     window.localStorage.clear();
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(PLAN));
+    server = stubPlanServer(PLAN);
     vi.spyOn(window, "scrollTo").mockImplementation(() => {});
     vi.stubGlobal("Image", FakeImage);
     FakeImage.reset();
@@ -310,7 +296,8 @@ describe("Release Plan – Flip board + Export PNG through the app (QA)", () => 
   it(
     "exports the orientation shown (also from Table view) with card positions matching the DOM board",
     async () => {
-      renderApp("/release-plan/board");
+      renderApp("/release-plan/1");
+      await screen.findByRole("region", { name: "Milestone summary" }, FIND);
       const plan = normalizePlan(PLAN);
 
       const std = new RecordingContext();

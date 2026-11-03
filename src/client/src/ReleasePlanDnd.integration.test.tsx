@@ -1,11 +1,8 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
-import { ToastProvider } from "./components/Toast";
-import { STORAGE_KEY } from "./lib/releasePlan/constants";
-import { ForecastProvider } from "./monteCarloStore";
+import { disableAutosave, stubPlanServer } from "./test/planServer";
+import { renderApp } from "./test/renderApp";
 import { fireDnd, flushDragTick, mockDataTransfer, stubRects } from "./test/dnd";
 
 // Release Plan drag-and-drop integration (Phase 2, QA): the real App with its
@@ -20,23 +17,6 @@ const FIND = { timeout: 5_000 };
 const LEFT = 10;
 const ALPHA = 0;
 const BETA = 1;
-
-function LocationProbe() {
-  return <div data-testid="location">{useLocation().pathname}</div>;
-}
-
-function renderApp(path = "/") {
-  return render(
-    <ToastProvider>
-      <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <LocationProbe />
-        </MemoryRouter>
-      </ForecastProvider>
-    </ToastProvider>,
-  );
-}
 
 const PLAN = {
   schema: "release-planner-features",
@@ -81,14 +61,21 @@ const card = (featureId: number) => board().querySelector<HTMLElement>(`.fcard[d
 const summaryCount = (name: string) =>
   within(screen.getByRole("region", { name: "Milestone summary" })).getByRole("group", { name }).querySelector(".n")?.textContent;
 
-function savedPlan(): { epics: Array<{ id: number; features: Array<{ id: number; milestoneId: string | null }> }> } {
-  return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
+type Saved = { epics: Array<{ id: number; features: Array<{ id: number; milestoneId: string | null }> }> };
+let server: ReturnType<typeof stubPlanServer>;
+
+/** Saves with the Save button (autosave is off in these tests) and returns what the server received last. */
+async function savedPlan(user: ReturnType<typeof userEvent.setup>): Promise<Saved> {
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.getByTestId("save-status")).toHaveTextContent("Saved"));
+  return server.puts[server.puts.length - 1].state as Saved;
 }
 
-/** Seeds the autosave with PLAN and opens the board (a saved plan is no longer imported from a JSON file). */
+/** The server holds PLAN (autosave off, so tests save explicitly); opens its board. */
 function openBoard(): ReturnType<typeof renderApp> {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(PLAN));
-  return renderApp("/release-plan/board");
+  server = stubPlanServer(PLAN);
+  disableAutosave();
+  return renderApp("/release-plan/1");
 }
 
 describe("Release Plan – drag-and-drop full app flow (Phase 2)", () => {
@@ -99,6 +86,7 @@ describe("Release Plan – drag-and-drop full app flow (Phase 2)", () => {
   });
   afterEach(() => {
     window.localStorage.clear();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -108,7 +96,7 @@ describe("Release Plan – drag-and-drop full app flow (Phase 2)", () => {
       const user = userEvent.setup();
       const first = openBoard();
       await screen.findByRole("region", { name: "Milestone summary" }, FIND);
-      expect(screen.getByTestId("location")).toHaveTextContent("/release-plan/board");
+      expect(screen.getByTestId("location")).toHaveTextContent("/release-plan/1");
       expect(summaryCount("Alpha")).toBe("2");
       expect(summaryCount("Beta")).toBe("1");
 
@@ -133,7 +121,7 @@ describe("Release Plan – drag-and-drop full app flow (Phase 2)", () => {
       expect(cell(1002, ALPHA).querySelector(".fcard")).toBeNull();
       expect(summaryCount("Alpha")).toBe("1");
       expect(summaryCount("Beta")).toBe("2");
-      expect(savedPlan().epics[0].features.map((f) => [f.id, f.milestoneId])).toEqual([
+      expect((await savedPlan(user)).epics[0].features.map((f) => [f.id, f.milestoneId])).toEqual([
         [1001, "ms_alpha"],
         [1002, "ms_beta"],
       ]);
@@ -157,7 +145,7 @@ describe("Release Plan – drag-and-drop full app flow (Phase 2)", () => {
       fireDnd("dragEnd", document, { dataTransfer: edt });
       expect(epicTitles()).toEqual(["Epic Two", "Epic One"]);
       expect(board().querySelectorAll(".dragging, .dropL, .dropR")).toHaveLength(0);
-      expect(savedPlan().epics.map((e) => e.id)).toEqual([102, 101]);
+      expect((await savedPlan(user)).epics.map((e) => e.id)).toEqual([102, 101]);
 
       // Ctrl+click a card: the selection is UI-only and must not survive the re-mount.
       fireEvent.click(card(1001), { ctrlKey: true });
@@ -165,8 +153,8 @@ describe("Release Plan – drag-and-drop full app flow (Phase 2)", () => {
 
       // "Reload": a fresh provider re-hydrates from the same storage.
       first.unmount();
-      renderApp("/release-plan/board");
-      expect(await screen.findByText("Restored your last session", undefined, FIND)).toBeInTheDocument();
+      renderApp("/release-plan/1");
+      await screen.findByRole("region", { name: "Milestone summary" }, FIND);
       expect(epicTitles()).toEqual(["Epic Two", "Epic One"]);
       expect(cell(1002, BETA).querySelector(".fcard")).not.toBeNull();
       expect(summaryCount("Beta")).toBe("2");

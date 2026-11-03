@@ -4,9 +4,6 @@
 export const SCHEMA = "release-planner-features";
 export const VERSION = 1;
 
-/** localStorage key of the autosaved plan. */
-export const STORAGE_KEY = "cmPlanningHub.releasePlan.v1";
-
 /** localStorage key of the last successful Azure DevOps connection (`lib/ado/connectionStorage.ts`; never a PAT). */
 export const ADO_CONNECTION_KEY = "cmPlanningHub.releasePlan.adoConnection.v1";
 

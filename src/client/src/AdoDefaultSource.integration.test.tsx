@@ -1,15 +1,16 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { createMemoryRouter, Outlet, RouterProvider, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
+import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import { PLACEHOLDER } from "./lib/ado/url";
 import { ADO_CONNECTION_KEY as MONTE_CARLO_KEY } from "./lib/monteCarlo/constants";
-import { ADO_CONNECTION_KEY as RELEASE_PLAN_KEY, STORAGE_KEY } from "./lib/releasePlan/constants";
+import { ADO_CONNECTION_KEY as RELEASE_PLAN_KEY } from "./lib/releasePlan/constants";
 import { ForecastProvider } from "./monteCarloStore";
 import { makeBacklog, makeConnectResponse } from "./test/adoFixtures";
 import { makeSprintHistory } from "./test/monteCarloFixtures";
+import { planDetail } from "./test/planServer";
 import { samplePlan } from "./test/releasePlanFixtures";
 
 // QA full-app integration for "Collaboration Hub selected by default" in the
@@ -22,13 +23,24 @@ function LocationProbe() {
 }
 
 function renderApp(path: string) {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <>
+            <Outlet />
+            <LocationProbe />
+          </>
+        ),
+        children: appRoutes,
+      },
+    ],
+    { initialEntries: [path] },
+  );
   return render(
     <ToastProvider>
       <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <LocationProbe />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ForecastProvider>
     </ToastProvider>,
   );
@@ -181,8 +193,9 @@ describe("ADO connection modal – Collaboration Hub by default (full app)", { t
     expect(bodiesTo(fetchMock, "/api/ado/backlog")[0]).toMatchObject({ source: "cloud", scopeType: "area" });
     expect(JSON.parse(window.localStorage.getItem(RELEASE_PLAN_KEY) ?? "null")).toEqual({ source: "cloud", projectUrl: CLOUD_URL });
     expect(window.localStorage.getItem(MONTE_CARLO_KEY)).toBeNull();
-    const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null") as { source?: { kind?: string } } | null;
-    expect(saved?.source).toMatchObject({ kind: "cloud" });
+    const created = bodiesTo(fetchMock, "/api/plan")[0] as { projectType?: string; state?: { source?: { kind?: string } } };
+    expect(created.projectType).toBe("cloud");
+    expect(created.state?.source).toMatchObject({ kind: "cloud" });
   });
 
   it("a remembered On-Prem connection in Release Plan's key does not change Monte Carlo's default (and is used by Release Plan)", async () => {
@@ -229,10 +242,11 @@ describe("ADO connection modal – Collaboration Hub by default (full app)", { t
   });
 
   it("Release Plan sync of an old plan (no connection info) ignores the remembered connection: the board isn't linked", async () => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(samplePlan()));
+    mockFetch({ "/api/plan/1": () => json(planDetail(1, samplePlan())) });
     window.localStorage.setItem(RELEASE_PLAN_KEY, JSON.stringify(ONPREM_SAVED));
     const user = userEvent.setup();
-    renderApp("/release-plan/board");
+    renderApp("/release-plan/1");
+    await screen.findByRole("region", { name: "Milestone summary" }, FIND);
 
     const toolbar = document.querySelector<HTMLElement>(".rp .toolbar");
     expect(toolbar).not.toBeNull();

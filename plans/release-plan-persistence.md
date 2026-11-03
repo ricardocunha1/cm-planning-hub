@@ -477,18 +477,18 @@ Agent: `frontend-developer`.
   5. QA covered abort on unmount but not abort on page change; the unit tests cover that one.
 
 ## Phase 4: Board persistence — routing, autosave, save, unsaved guard (client)
-Status: Not started
+Status: Complete
 
 Agent: `frontend-developer`.
 
-- [ ] Move to a data router (`createBrowserRouter` + `RouterProvider` in `main.tsx`/`App.tsx`), keeping every existing route. Change the board route to `/release-plan/:id`, and redirect `/release-plan/board` → `/release-plan`. Update `test/render.tsx` (`renderAt`) and the existing tests that navigate to `/release-plan/board`.
-- [ ] Store (`releasePlanStore.tsx`): remove the localStorage storage, `restoredFromStorage` and `consumeRestoredNotice`. Add `planId`, `loadPlan(id, plan)` and `clearPlan()`. Delete `lib/releasePlan/storage.ts` (+ test) and `STORAGE_KEY` usage, except for a one-time `removeItem("cmPlanningHub.releasePlan.v1")` on provider mount.
-- [ ] `ReleasePlanBoardPage`: load by `:id` (loading state; when the store already holds that id, e.g. right after create, skip the fetch), `normalizePlan`, the not-found/unreadable → toast + redirect handling, and clear the plan when leaving.
-- [ ] `usePlanPersistence(planId, plan)` hook: a change counter, 3 s debounce when autosave is on, `saveNow()`, the status (`saved | dirty | saving | error`), last-write-wins PUT `{name, state}`, a stale-response guard, the 404 → toast + redirect, and abort on unmount. The first plan load is `saved` (not dirty).
-- [ ] `BoardToolbar`: (Load/Save Plan, the Load modal and `ReplaceBoardDialog` were already removed in Phase 3.) Add the Autosave switch (persisted via `autosavePreference`), the save status and the Save button rules.
-- [ ] `UnsavedChangesDialog` + `useBlocker` (when status ≠ `saved`) + a `beforeunload` listener while dirty (Save / Discard / Cancel per *Decisions*).
-- [ ] Unit tests: hook (debounce timing with fake timers, coalescing several changes into one PUT, toggle off → no PUT, toggle on while dirty → PUT, failure → `error` + toast, stale response, 404), toolbar controls, board page load states, guard dialog (each button), `beforeunload` registered only while dirty, and that the old localStorage key is removed.
-- [ ] Update/remove the now-obsolete integration tests that rely on JSON save/load or localStorage restore (`ReleasePlanSaveLoad.integration.test.tsx`, the parts of others). `qa-engineer` rewrites the integration coverage in QA.
+- [x] Move to a data router (`createBrowserRouter` + `RouterProvider` in `main.tsx`/`App.tsx`), keeping every existing route. Change the board route to `/release-plan/:id`, and redirect `/release-plan/board` → `/release-plan`. Update `test/render.tsx` (`renderAt`) and the existing tests that navigate to `/release-plan/board`.
+- [x] Store (`releasePlanStore.tsx`): remove the localStorage storage, `restoredFromStorage` and `consumeRestoredNotice`. Add `planId`, `loadPlan(id, plan)` and `clearPlan()`. Delete `lib/releasePlan/storage.ts` (+ test) and `STORAGE_KEY` usage, except for a one-time `removeItem("cmPlanningHub.releasePlan.v1")` on provider mount.
+- [x] `ReleasePlanBoardPage`: load by `:id` (loading state; when the store already holds that id, e.g. right after create, skip the fetch), `normalizePlan`, the not-found/unreadable → toast + redirect handling, and clear the plan when leaving.
+- [x] `usePlanPersistence(planId, plan)` hook: a change counter, 3 s debounce when autosave is on, `saveNow()`, the status (`saved | dirty | saving | error`), last-write-wins PUT `{name, state}`, a stale-response guard, the 404 → toast + redirect, and abort on unmount. The first plan load is `saved` (not dirty).
+- [x] `BoardToolbar`: (Load/Save Plan, the Load modal and `ReplaceBoardDialog` were already removed in Phase 3.) Add the Autosave switch (persisted via `autosavePreference`), the save status and the Save button rules.
+- [x] `UnsavedChangesDialog` + `useBlocker` (when status ≠ `saved`) + a `beforeunload` listener while dirty (Save / Discard / Cancel per *Decisions*).
+- [x] Unit tests: hook (debounce timing with fake timers, coalescing several changes into one PUT, toggle off → no PUT, toggle on while dirty → PUT, failure → `error` + toast, stale response, 404), toolbar controls, board page load states, guard dialog (each button), `beforeunload` registered only while dirty, and that the old localStorage key is removed.
+- [x] Update/remove the now-obsolete integration tests that rely on JSON save/load or localStorage restore (`ReleasePlanSaveLoad.integration.test.tsx`, the parts of others). `qa-engineer` rewrites the integration coverage in QA.
 
 ### Verification Plan
 - `cd src/client && npm run build && npm test -- --run` → build ok, all tests pass.
@@ -497,7 +497,70 @@ Agent: `frontend-developer`.
 - QA (`qa-engineer`) adds integration tests with a mocked `fetch` for: create → board → change → autosave PUT after 3 s → reload route → same state; list paging + delete; autosave off → Save button → PUT; unsaved guard on sidebar navigation.
 
 ### Phase Summary
-_(write when phase completes)_
+**Done (2026-11-03).** Agents: `frontend-developer` (develop), `qa-engineer` (review and integration tests). 1 Develop ↔ QA cycle: QA passed with no Blocker or Major findings.
+
+- **Routing**:
+  - `App.tsx` exports `appRoutes`, and `App` is now the root layout (`ReleasePlanProvider`, `ScrollToTop`, `<Outlet/>`).
+  - `main.tsx` uses `createBrowserRouter(appRoutes)` with `RouterProvider`.
+  - `/release-plan/board` redirects to `/release-plan`, and `/release-plan/:id` is the board.
+- **Store** (`releasePlanStore.tsx`):
+  - Exposes `plan`, `dispatch`, `planId`, `loadPlan(id, plan)` and `clearPlan()`.
+  - Removed: localStorage storage, `restoredFromStorage`, `consumeRestoredNotice` and `replacePlan`.
+  - On mount it removes `cmPlanningHub.releasePlan.v1` once, inside a try/catch.
+  - Tests can pass `initialPlan` / `initialPlanId`.
+  - Deleted: `lib/releasePlan/storage.ts` (+ test), `STORAGE_KEY`, and the `Download`/`Upload`/`FileJson` icons.
+- **Board page** (`pages/ReleasePlanBoardPage.tsx`):
+  - Loads the plan by `:id`, and skips the fetch when the store already holds that id (e.g. right after create).
+  - `normalizePlan` **throws** on bad input rather than returning null. The page catches that and shows "This release plan could not be read".
+  - Non-numeric id, 404 or unreadable state → error toast, then redirect to the list.
+  - Any other error → the message with a Retry button.
+  - It clears the plan when it unmounts or the id changes.
+  - The inner `LoadedBoard` holds the persistence hook, the `useBlocker` guard, the `beforeunload` listener and `UnsavedChangesDialog`.
+- **`components/releasePlan/usePlanPersistence.ts`**:
+  - Keeps a change counter and a status (`saved|dirty|saving|error`), and debounces saves by 3 s while autosave is on.
+  - PUTs are serialized, so they never overlap.
+  - Has a stale-response guard, toasts and redirects on a 404, and aborts on unmount.
+  - Exposes `saveNow()` (loops until clean, resolves to a boolean), `hasUnsaved()` (reads refs, used by the blocker) and `setAutosave`.
+  - Error toasts are titled "Could not open/save the release plan", with the messages from the spec.
+- **Toolbar**:
+  - An Autosave switch (`role="switch"`), and the status in `data-testid="save-status"` (`aria-live="polite"`).
+  - A Save button appears when autosave is off or the last save failed. It is disabled while `saved` and also while `saving`.
+- **PlanList** (Phase 3 Minors 1–3 fixed): it refetches after a failed delete and clamps to the last page. The stale JSON comment in `selectors.ts` is removed.
+- **Test infrastructure**:
+  - `renderAt` now uses `createMemoryRouter`. Its `planStorage` option is gone; it gains `initialPlanId` / `initialEntry`.
+  - New helpers: `test/renderApp.tsx` (the real `appRoutes`) and `test/planServer.ts` (a fake `/api/plan/{id}` that records PUTs, plus `disableAutosave`).
+  - Board tests seed the plan through the store or a faked GET. Tests that read the saved state turn autosave off, click Save and read the PUT body. This restores the coverage of Phase 3 Minor 4 (a reload now reloads from the server).
+- **Tests**:
+  - Unit, by the developer:
+    - `usePlanPersistence.test.tsx` (14), `BoardToolbar.test.tsx` (10), `UnsavedChangesDialog.test.tsx` (9) and `ReleasePlanBoardPersistence.test.tsx` (20).
+    - `releasePlanStore.test.tsx` (rewritten, 7) and `PlanList` (+1).
+    - Many existing tests were adjusted mechanically.
+  - Integration, by QA: `pages/ReleasePlanPersistenceBoard.integration.test.tsx` (17). It covers:
+    - Create → rename → autosave PUT → reopen from the list; coalescing.
+    - Autosave off → Save, and toggling back on while dirty.
+    - The legacy key.
+    - The guard: Cancel/Esc, Discard, Save, a failed Save then a retry.
+    - A 503 → Save failed → retry, and a change during an in-flight save.
+    - PUT 404, GET 404, `/abc` and `/board` redirects, an unreadable state.
+    - Switching between plans, delete from the list, `beforeunload` only while dirty, StrictMode.
+- **Verification (re-run by the main session)**:
+  - Client: `tsc -b` OK, `vite build` OK (to the scratchpad), 83 files / 880 tests pass (baseline 79 / 822).
+  - The grep finds only the redirect route in `App.tsx` (plus test files that assert the old buttons are absent).
+  - Server: `compileall` OK; `pytest` without a DB 831 passed / 41 skipped. There is no server change.
+  - Smoke test (`docker compose up -d --build`):
+    - `/release-plan/1` → 200 `text/html`.
+    - POST → id; PUT with a rename → 200, and `GET /api/plan` lists "Renamed" first.
+    - DELETE → 204.
+- **Note:** the user renamed the compose service `db` → `postgres` (uncommitted). Local DB tests now use `docker compose up -d postgres`; Phase 5's README must say that.
+- **Follow-up (user request, 2026-11-03)**:
+  - The Save button has a floppy-disk `SaveIcon` (`components/icons/SaveIcon.tsx`, `btn withIcon` like Sync from ADO).
+  - Autosave is a sliding toggle styled like Monte Carlo's "Skip Historical Sprint Validation". It is an `sr-only` checkbox with `role="switch"` and `id="autosave-toggle"`, on a smaller `slate-300` track to suit the light toolbar.
+  - Client: 83 files / 885 tests pass.
+- **Open Minors (not blocking)**:
+  1. `UnsavedChangesDialog`: Esc or a backdrop click acts as Cancel while a Save started from the dialog is in flight. It is harmless, but it should be ignored while saving.
+  2. `test/renderApp.tsx` doesn't wrap in `StrictMode`. QA's StrictMode test covers this.
+  3. The header comments in `ReleasePlanDnd` / `ReleasePlanFlip` integration tests still mention jsdom localStorage autosave.
+  4. The deletions and the icon test rename were staged with `git rm` / `git mv`; nothing is committed.
 
 ## Phase 5: Helm chart, README and spec notes
 Status: Not started

@@ -1,18 +1,18 @@
 // QA integration tests for the read-only "Sync from ADO" connection (only the PAT is entered; the
 // project URL and Area/Iteration path come from plan.source).
-// Real App routes, pages, store with the real localStorage autosave and real adoApi; only `fetch`
+// Real App routes, pages, store and real adoApi/planApi; only `fetch`
 // and the browser download boundary are mocked.
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { createMemoryRouter, Outlet, RouterProvider, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../App";
+import { appRoutes } from "../App";
 import { ToastProvider } from "../components/Toast";
-import { STORAGE_KEY } from "../lib/releasePlan/constants";
 import { planFromBacklog } from "../lib/releasePlan/fromBacklog";
 import type { ReleasePlan } from "../lib/releasePlan/types";
 import { ForecastProvider } from "../monteCarloStore";
 import { makeBacklog, makeConnection } from "../test/adoFixtures";
+import { planDetail } from "../test/planServer";
 import { sequentialIds } from "../test/releasePlanFixtures";
 
 const PAT = "qa-readonly-sync-pat-0123456789";
@@ -31,13 +31,24 @@ function LocationProbe() {
 }
 
 function renderApp(path: string) {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <>
+            <Outlet />
+            <LocationProbe />
+          </>
+        ),
+        children: appRoutes,
+      },
+    ],
+    { initialEntries: [path] },
+  );
   return render(
     <ToastProvider>
       <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <LocationProbe />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ForecastProvider>
     </ToastProvider>,
   );
@@ -59,10 +70,14 @@ function linkedPlan(connection: typeof CLOUD, name: string): ReleasePlan {
   return { ...planFromBacklog(backlog, connection, sequentialIds()), name };
 }
 
-function mockBacklog() {
+/** `fetch` mock: GET /api/plan/1 returns `plan`; /api/ado/backlog returns the default backlog. */
+function mockBacklog(plan: unknown = null) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     if (String(input) === "/api/ado/backlog") {
       return json(makeBacklog());
+    }
+    if (String(input) === "/api/plan/1" && plan !== null) {
+      return json(planDetail(1, plan));
     }
     return json({ errors: [`unexpected ${String(input)}`] }, 500);
   });
@@ -104,9 +119,10 @@ describe("Release Plan – read-only Sync connection restored from storage (inte
 
   it("shows the stored plan's connection read-only and Sync posts it with the typed PAT", async () => {
     const user = userEvent.setup();
-    const fetchMock = mockBacklog();
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(linkedPlan(CLOUD, "Board A")));
-    renderApp("/release-plan/board");
+    const fetchMock = mockBacklog(linkedPlan(CLOUD, "Board A"));
+    renderApp("/release-plan/1");
+    await screen.findByRole("region", { name: "Milestone summary" }, FIND);
+    fetchMock.mockClear();
     const dialog = await openSync(user);
     expectConnectionShown(dialog, CLOUD);
     await user.type(within(dialog).getByLabelText("Personal Access Token"), PAT);
@@ -121,23 +137,26 @@ describe("Release Plan – read-only Sync connection restored from storage (inte
   it("a whitespace-only scopePath from JSON is shown as-is and the server's 422 appears inline (no crash, nothing saved)", async () => {
     const user = userEvent.setup();
     const plan = linkedPlan(CLOUD, "Blank path");
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...plan, source: { ...plan.source, scopePath: "   " } }));
-    const fetchMock = vi.fn(async () => json({ errors: ["Select an Area or Iteration path."] }, 422));
+    const blank = { ...plan, source: { ...plan.source, scopePath: "   " } };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input) === "/api/plan/1" ? json(planDetail(1, blank)) : json({ errors: ["Select an Area or Iteration path."] }, 422),
+    );
     vi.stubGlobal("fetch", fetchMock);
-    renderApp("/release-plan/board");
+    renderApp("/release-plan/1");
+    await screen.findByRole("region", { name: "Milestone summary" }, FIND);
     const dialog = await openSync(user);
-    const before = window.localStorage.getItem(STORAGE_KEY);
     expect(within(dialog).getByLabelText("Personal Access Token")).toBeInTheDocument();
     await user.type(within(dialog).getByLabelText("Personal Access Token"), `${PAT}{Enter}`);
     expect(await within(dialog).findByRole("alert", {}, FIND)).toHaveTextContent("Select an Area or Iteration path.");
     expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(before);
+    expect(screen.getByTestId("save-status")).toHaveTextContent("Saved");
   });
 
   it("focus goes to the PAT input on open and returns to the Sync button on close", async () => {
     const user = userEvent.setup();
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(linkedPlan(CLOUD, "Board A")));
-    renderApp("/release-plan/board");
+    mockBacklog(linkedPlan(CLOUD, "Board A"));
+    renderApp("/release-plan/1");
+    await screen.findByRole("region", { name: "Milestone summary" }, FIND);
     const button = within(toolbar()).getByRole("button", { name: "Sync from ADO" });
     await user.click(button);
     const dialog = syncDialog();

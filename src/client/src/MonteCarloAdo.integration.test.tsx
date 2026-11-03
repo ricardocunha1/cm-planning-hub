@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
+import { createMemoryRouter, Outlet, RouterProvider, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
+import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import { ADO_CONNECTION_KEY as MONTE_CARLO_KEY } from "./lib/monteCarlo/constants";
 import { ADO_CONNECTION_KEY as RELEASE_PLAN_KEY } from "./lib/releasePlan/constants";
@@ -30,13 +30,24 @@ function RouterProbe() {
 }
 
 function renderApp(path = "/monte-carlo") {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <>
+            <Outlet />
+            <RouterProbe />
+          </>
+        ),
+        children: appRoutes,
+      },
+    ],
+    { initialEntries: [path] },
+  );
   return render(
     <ToastProvider>
       <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <RouterProbe />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ForecastProvider>
     </ToastProvider>,
   );

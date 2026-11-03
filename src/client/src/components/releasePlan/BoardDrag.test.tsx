@@ -1,7 +1,6 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanStorage } from "../../lib/releasePlan/storage";
 import { fireDnd, flushDragTick, mockDataTransfer, stubRects } from "../../test/dnd";
 import { samplePlan } from "../../test/releasePlanFixtures";
 import { BOARD_TEST_TIMEOUT_MS, renderBoard } from "../../test/renderBoard";
@@ -187,16 +186,14 @@ describe("Board drag-and-drop", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
       expect(highlighted()).toHaveLength(0);
     });
 
-    it("persists a drop to storage", () => {
-      const save = vi.fn<PlanStorage["save"]>();
-      const storage: PlanStorage = { load: () => samplePlan(), save };
-      renderBoard(null, storage);
+    it("marks the plan as having unsaved changes after a drop", () => {
+      renderBoard(samplePlan());
+      expect(screen.getByTestId("save-status")).toHaveTextContent("Saved");
       const dt = mockDataTransfer();
       fireDnd("dragStart", card("Exports"), { dataTransfer: dt });
       fireDnd("dragOver", cell(22, R2), { dataTransfer: dt });
       fireDnd("drop", cell(22, R2), { dataTransfer: dt });
-      const plan = save.mock.calls.at(-1)?.[0];
-      expect(plan?.epics[1].features.find((f) => f.id === 22)?.milestoneId).toBe("ms_r2");
+      expect(screen.getByTestId("save-status")).toHaveTextContent("Unsaved changes");
     });
   });
 

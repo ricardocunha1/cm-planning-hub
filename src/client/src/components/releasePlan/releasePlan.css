@@ -221,3 +221,4 @@
 .rp .wi-children li { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .rp .wi-children li button { border: 0; background: none; padding: 0; color: var(--ink); cursor: pointer; text-align: left; font: inherit; flex: 1; }
 .rp .wi-children li button:hover { text-decoration: underline; }
+.rp .saveStatus { color: var(--muted); font-size: 12.5px; white-space: nowrap; }

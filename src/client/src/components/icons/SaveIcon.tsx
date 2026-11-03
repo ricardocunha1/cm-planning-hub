@@ -10,13 +10,13 @@ const svgProps = {
   focusable: false,
 } as const;
 
-/** Arrow dropping into a tray: downloading the plan as a file ("Save Plan"). */
-export function DownloadIcon({ className = "h-4 w-4" }: { className?: string }) {
+/** A floppy disk: saving the release plan now ("Save"). */
+export function SaveIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg className={className} {...svgProps}>
-      <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
-      <path d="M12 4v11" />
-      <path d="M7.5 10.5 12 15l4.5-4.5" />
+      <path d="M5 3h11l4 4v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+      <path d="M7 3v5h8V3" />
+      <path d="M7 21v-7h10v7" />
     </svg>
   );
 }

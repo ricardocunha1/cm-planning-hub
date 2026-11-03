@@ -3,24 +3,17 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdoBacklog } from "../lib/releasePlan/adoTypes";
 import { planFromBacklog } from "../lib/releasePlan/fromBacklog";
-import type { PlanStorage } from "../lib/releasePlan/storage";
+import type { ReleasePlan } from "../lib/releasePlan/types";
 import { FakeImage, RecordingContext, stubCanvas } from "../test/canvas";
 import { makeBacklog, makeConnection, makeFeatureItem } from "../test/adoFixtures";
 import { makeEpic, makeFeature, samplePlan, sequentialIds, sprintsPlan } from "../test/releasePlanFixtures";
 import { BOARD_TEST_TIMEOUT_MS, renderBoard } from "../test/renderBoard";
 
-const location = () => screen.getByTestId("location").textContent;
 const summaryBox = (name: string) => within(screen.getByRole("region", { name: "Milestone summary" })).getByRole("group", { name });
 const featureCount = (name: string) => summaryBox(name).querySelector(".n")?.textContent;
 const zoomValue = () => screen.getByTestId("zoom-value").textContent;
 
 describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
-  it("redirects to /release-plan when there is no plan", () => {
-    renderBoard(null);
-    expect(location()).toBe("/release-plan");
-    expect(screen.getByText("release plan home page")).toBeInTheDocument();
-  });
-
   it("renders the board with its title, toolbar, summary and hint; only epic headers and cards are draggable", () => {
     const { container } = renderBoard(samplePlan());
     expect(document.title).toBe("Planning Hub – Release Plan – Board");
@@ -36,26 +29,6 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     expect(draggable).toHaveLength(3 + 5);
     expect([...container.querySelectorAll('[draggable="false"]')].map((el) => el.textContent)).toEqual(["◀", "▶", "◀", "▶", "◀", "▶"]);
     expect(screen.getByRole("button", { name: "Export PNG" })).toBeInTheDocument();
-  });
-
-  it("shows 'Restored your last session' once when hydrated from storage, and autosaves changes", async () => {
-    const user = userEvent.setup();
-    const save = vi.fn<PlanStorage["save"]>();
-    const storage: PlanStorage = { load: () => samplePlan(), save };
-    renderBoard(null, storage);
-    expect(screen.getAllByRole("status").filter((s) => s.textContent === "Restored your last session")).toHaveLength(1);
-    await user.click(screen.getByRole("tab", { name: "Table" }));
-    await user.click(screen.getByRole("tab", { name: "Board" }));
-    expect(screen.getAllByText("Restored your last session")).toHaveLength(1);
-    const name = screen.getByLabelText("Plan name");
-    await user.clear(name);
-    await user.type(name, "Autosaved{Enter}");
-    expect(save).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Autosaved" }));
-  });
-
-  it("does not show the restored toast for an in-memory plan", () => {
-    renderBoard(samplePlan());
-    expect(screen.queryByText("Restored your last session")).not.toBeInTheDocument();
   });
 
   it("renames the plan on commit (trimmed; empty → 'Feature Release Plan') and sizes the input", async () => {
@@ -295,6 +268,9 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
         if (url === "/api/ado/backlog") {
           return json(backlog);
         }
+        if (url === "/api/plan/1" && _init?.method === "PUT") {
+          return json({ id: 1 });
+        }
         throw new Error(`unexpected ${url}`);
       });
       vi.stubGlobal("fetch", fetchMock);
@@ -366,29 +342,34 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
       expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
     });
 
-    it("previews the diff; Apply updates the board in one autosave, closes the work-item modal and toasts with the warnings", async () => {
+    it("previews the diff; Apply updates the board as one change, closes the work-item modal and toasts with the warnings", async () => {
       const user = userEvent.setup();
-      mockFetch();
-      const save = vi.fn<PlanStorage["save"]>();
-      renderBoard(null, { load: () => adoPlan(), save });
+      const fetchMock = mockFetch();
+      renderBoard(adoPlan());
+      // Manual saving, so the PUT can be inspected without waiting for the autosave delay.
+      await user.click(screen.getByRole("switch", { name: "Autosave" }));
       await openPreview(user);
       const preview = screen.getByRole("dialog", { name: "Sync from Azure DevOps" });
       expect(within(preview).queryByLabelText("Personal Access Token")).not.toBeInTheDocument();
       expect([...preview.querySelectorAll("summary")].map((s) => s.textContent)).toEqual(["1 new Feature", "1 updated", "1 no longer in scope"]);
       expect(within(preview).getByRole("checkbox", { name: "Remove items no longer in scope" })).not.toBeChecked();
-      const savesBefore = save.mock.calls.length;
+      expect(screen.getByTestId("save-status")).toHaveTextContent("Saved");
       await user.click(screen.getByRole("button", { name: "Apply" }));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-      expect(save.mock.calls.length - savesBefore).toBe(1);
-      const saved = save.mock.lastCall?.[0];
-      expect(saved?.epics[0].features.map((f) => [f.id, f.title, f.milestoneId])).toEqual([
+      expect(screen.getByTestId("save-status")).toHaveTextContent("Unsaved changes");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(screen.getByTestId("save-status")).toHaveTextContent("Saved"));
+      const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT");
+      expect(puts).toHaveLength(1);
+      const saved = (JSON.parse(String(puts[0][1]?.body)) as { state: ReleasePlan }).state;
+      expect(saved.epics[0].features.map((f) => [f.id, f.title, f.milestoneId])).toEqual([
         [102, "Sign in", "ms_1"],
         [104, "Dashboard", "ms_1"],
         [108, "Search", null],
       ]);
       // Not removed: the box was unticked.
-      expect(saved?.epics[1].features.map((f) => f.id)).toEqual([105]);
-      expect(saved?.source.fetchedAt).toBe("2026-10-24T09:00:00Z");
+      expect(saved.epics[1].features.map((f) => f.id)).toEqual([105]);
+      expect(saved.source.fetchedAt).toBe("2026-10-24T09:00:00Z");
       const board = within(screen.getByRole("region", { name: "Board" }));
       expect(board.getByText("Sign in")).toBeInTheDocument();
       expect(board.getByText("Search")).toBeInTheDocument();
@@ -431,20 +412,18 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
       expect(toasts()).toContain("Board synchronized with Azure DevOps");
     });
 
-    it("Cancel in the preview changes nothing and saves nothing", async () => {
+    it("Cancel in the preview changes nothing and leaves the plan saved", async () => {
       const user = userEvent.setup();
       mockFetch();
-      const save = vi.fn<PlanStorage["save"]>();
-      renderBoard(null, { load: () => adoPlan(), save });
+      renderBoard(adoPlan());
       await openPreview(user);
-      const savesBefore = save.mock.calls.length;
       await user.click(screen.getByRole("button", { name: "Cancel" }));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-      expect(save.mock.calls.length).toBe(savesBefore);
+      expect(screen.getByTestId("save-status")).toHaveTextContent("Saved");
       const board = within(screen.getByRole("region", { name: "Board" }));
       expect(board.getByText("Login")).toBeInTheDocument();
       expect(board.queryByText("Search")).not.toBeInTheDocument();
-      // queryAll: there may be no toast at all once "Restored your last session" (2.2s) has auto-dismissed.
+      // queryAll: there may be no toast at all.
       expect(screen.queryAllByRole("status").map((s) => s.textContent)).not.toContain("Board synchronized with Azure DevOps");
     });
   });

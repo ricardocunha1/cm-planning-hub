@@ -1,7 +1,7 @@
 name: planninghub
 
 services:
-  db:
+  postgres:
     image: postgres:17
     environment:
       POSTGRES_USER: planninghub
@@ -20,11 +20,11 @@ services:
     image: planninghub/planninghub-server:local
     environment:
       ADO_ALLOWED_HOSTS: dev.azure.com,*.visualstudio.com,tfs-projects.cmf.criticalmanufacturing.com
-      DB_HOST: db
+      DB_HOST: postgres
       DB_USER: planninghub
       DB_PASSWORD: planninghub
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]

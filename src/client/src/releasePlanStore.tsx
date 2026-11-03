@@ -1,81 +1,63 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type Dispatch, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type Dispatch, type ReactNode } from "react";
 import { planReducer, type PlanAction } from "./lib/releasePlan/reducer";
-import { localPlanStorage, type PlanStorage } from "./lib/releasePlan/storage";
 import type { ReleasePlan } from "./lib/releasePlan/types";
 
+/** localStorage key of the board autosave of earlier versions; removed once on start (plans now live on the server). */
+const LEGACY_STORAGE_KEY = "cmPlanningHub.releasePlan.v1";
+
 interface ReleasePlanState {
-  /** The current plan, `null` when no board was created or restored. */
+  /** The current plan, `null` when no board is open. */
   plan: ReleasePlan | null;
-  /** Applies a `PlanAction`; every change is autosaved. */
+  /** Applies a `PlanAction`. */
   dispatch: Dispatch<PlanAction>;
-  /** Server id of the saved plan being edited, `null` when the plan is not (yet) tied to a saved plan. */
+  /** Server id of the saved plan being edited, `null` when no plan is open. */
   planId: number | null;
   /** Makes `plan` the current board, saved on the server as `id`. */
   loadPlan: (id: number, plan: ReleasePlan) => void;
-  /** Replaces the whole plan (not tied to a saved plan: `planId` becomes `null`); clears the pending "restored" notice. */
-  replacePlan: (plan: ReleasePlan) => void;
-  /** Whether the plan was hydrated from storage on mount. */
-  restoredFromStorage: boolean;
-  /** Returns `true` exactly once if the restored-session notice is still pending (safe under StrictMode). */
-  consumeRestoredNotice: () => boolean;
+  /** Closes the board: no plan, no id. */
+  clearPlan: () => void;
 }
 
 const ReleasePlanContext = createContext<ReleasePlanState | null>(null);
 
 /**
- * Holds the Release Plan board state (`useReducer` over `planReducer`), lazily
- * hydrated from `storage` and saved after every change. `storage={null}` keeps it
- * in memory only; `initialPlan` (tests) skips hydration. Mounted in `App.tsx`
- * around the routes (not in `main.tsx`).
+ * Holds the Release Plan board being edited (`useReducer` over `planReducer`)
+ * and the server id it is saved under. In memory only: persistence is the
+ * board page's job (`usePlanPersistence`). `initialPlan` / `initialPlanId`
+ * (tests) start with a board open. On mount it removes the legacy localStorage
+ * autosave key. Mounted in `App.tsx` around the routes (not in `main.tsx`).
  */
 export function ReleasePlanProvider({
   children,
-  initialPlan,
-  storage = localPlanStorage,
+  initialPlan = null,
+  initialPlanId = null,
 }: {
   children: ReactNode;
   initialPlan?: ReleasePlan | null;
-  storage?: PlanStorage | null;
+  initialPlanId?: number | null;
 }) {
-  const [init] = useState(() => {
-    if (initialPlan !== undefined) {
-      return { plan: initialPlan, restored: false };
-    }
-    const saved = storage ? storage.load() : null;
-    return { plan: saved, restored: saved !== null };
-  });
-  const [plan, dispatch] = useReducer(planReducer, init.plan);
-  const [planId, setPlanId] = useState<number | null>(null);
-  const restoredNotice = useRef(init.restored);
+  const [plan, dispatch] = useReducer(planReducer, initialPlan);
+  const [planId, setPlanId] = useState<number | null>(initialPlanId);
 
   useEffect(() => {
-    if (plan && storage) {
-      storage.save(plan);
+    try {
+      window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch {
+      // Storage unavailable: nothing to clean up.
     }
-  }, [plan, storage]);
-
-  const replacePlan = useCallback((next: ReleasePlan) => {
-    restoredNotice.current = false;
-    setPlanId(null);
-    dispatch({ type: "replace", plan: next });
   }, []);
 
   const loadPlan = useCallback((id: number, next: ReleasePlan) => {
-    restoredNotice.current = false;
     setPlanId(id);
     dispatch({ type: "replace", plan: next });
   }, []);
 
-  const consumeRestoredNotice = useCallback(() => {
-    const pending = restoredNotice.current;
-    restoredNotice.current = false;
-    return pending;
+  const clearPlan = useCallback(() => {
+    setPlanId(null);
+    dispatch({ type: "replace", plan: null });
   }, []);
 
-  const value = useMemo(
-    () => ({ plan, dispatch, planId, loadPlan, replacePlan, restoredFromStorage: init.restored, consumeRestoredNotice }),
-    [plan, planId, loadPlan, replacePlan, init.restored, consumeRestoredNotice],
-  );
+  const value = useMemo(() => ({ plan, dispatch, planId, loadPlan, clearPlan }), [plan, planId, loadPlan, clearPlan]);
   return <ReleasePlanContext.Provider value={value}>{children}</ReleasePlanContext.Provider>;
 }
 

@@ -1,7 +1,6 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlanStorage } from "../../lib/releasePlan/storage";
 import { fireDnd, flushDragTick, mockDataTransfer, stubRects } from "../../test/dnd";
 import { samplePlan, sprintsPlan } from "../../test/releasePlanFixtures";
 import { BOARD_TEST_TIMEOUT_MS, renderBoard } from "../../test/renderBoard";
@@ -65,14 +64,12 @@ describe("Flip board toggle", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     expect(header()).toBeInTheDocument();
   });
 
-  it("is not part of the plan: flipping saves nothing", () => {
-    const save = vi.fn<PlanStorage["save"]>();
-    renderBoard(null, { load: () => samplePlan(), save });
-    const before = save.mock.calls.length;
+  it("is not part of the plan: flipping leaves the plan saved", () => {
+    renderBoard(samplePlan());
     flip();
     flip();
     flip();
-    expect(save.mock.calls.length).toBe(before);
+    expect(screen.getByTestId("save-status")).toHaveTextContent("Saved");
   });
 });
 

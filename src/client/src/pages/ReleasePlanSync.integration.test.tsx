@@ -1,20 +1,20 @@
 // QA integration tests for "Sync from ADO" (plans/release-plan-ado.md, Phase 4).
-// Real App routes, real pages, real store with the real localStorage autosave, real adoApi;
-// only `fetch` is mocked at the network boundary (synthetic responses, never a real Azure DevOps).
+// Real App routes, real pages, real store, real adoApi and planApi; only `fetch` is mocked at the network boundary
+// (synthetic responses and a one-plan fake of /api/plan, never a real Azure DevOps). Autosave is off: tests save with the Save button.
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { createMemoryRouter, Outlet, RouterProvider, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../App";
+import { appRoutes } from "../App";
 import { ToastProvider } from "../components/Toast";
 import type { AdoBacklog } from "../lib/releasePlan/adoTypes";
-import { STORAGE_KEY } from "../lib/releasePlan/constants";
 import { planFromBacklog } from "../lib/releasePlan/fromBacklog";
 import { planReducer } from "../lib/releasePlan/reducer";
 import { NO_EPIC_ID, type ReleasePlan } from "../lib/releasePlan/types";
 import { normalizePlan } from "../lib/releasePlan/validate";
 import { ForecastProvider } from "../monteCarloStore";
 import { makeBacklog, makeConnectResponse, makeConnection, makeEpicItem, makeFeatureItem } from "../test/adoFixtures";
+import { disableAutosave } from "../test/planServer";
 import { samplePlan, sequentialIds } from "../test/releasePlanFixtures";
 
 // The home page's saved-plans list is not under test here (and must not count as a request).
@@ -34,13 +34,24 @@ function LocationProbe() {
 }
 
 function renderApp(path: string) {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <>
+            <Outlet />
+            <LocationProbe />
+          </>
+        ),
+        children: appRoutes,
+      },
+    ],
+    { initialEntries: [path] },
+  );
   return render(
     <ToastProvider>
       <ForecastProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-          <LocationProbe />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ForecastProvider>
     </ToastProvider>,
   );
@@ -83,13 +94,31 @@ function changedBacklog(): AdoBacklog {
   };
 }
 
-function mockNetwork(backlogs: (() => Response)[]) {
+/** What the fake plan server stores (the POSTed state, then each PUT's state), and how many PUTs it got. */
+let serverPlan: ReleasePlan | null = null;
+let serverDetail: Record<string, unknown> | null = null;
+let putCount = 0;
+
+function mockNetwork(backlogs: (() => Response)[], existing?: ReleasePlan) {
   let backlogCalls = 0;
+  putCount = 0;
+  serverPlan = existing ?? null;
+  serverDetail = existing ? { id: 1, name: existing.name, projectType: "onprem", projectName: "Proj", createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z" } : null;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "/api/plan") {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return json({ id: 42, ...body, createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z" }, 201);
+      serverPlan = body.state as ReleasePlan;
+      serverDetail = { id: 42, ...body, createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z" };
+      delete serverDetail.state;
+      return json({ ...serverDetail, state: serverPlan }, 201);
+    }
+    if (serverDetail && url === `/api/plan/${String(serverDetail.id)}`) {
+      if (init?.method === "PUT") {
+        putCount++;
+        serverPlan = (JSON.parse(String(init.body)) as { state: ReleasePlan }).state;
+      }
+      return json({ ...serverDetail, state: serverPlan });
     }
     if (url === "/api/ado/connect") {
       return json(makeConnectResponse({ project: PROJECT, projectUrl: CANONICAL }));
@@ -105,9 +134,16 @@ function mockNetwork(backlogs: (() => Response)[]) {
   return fetchMock;
 }
 
-function storedPlan(): ReleasePlan {
-  return JSON.parse(window.localStorage.getItem(STORAGE_KEY)!) as ReleasePlan;
+/** Saves the board with the Save button (a no-op when already saved) and returns the plan the server holds. */
+async function storedPlan(user: User): Promise<ReleasePlan> {
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.getByTestId("save-status")).toHaveTextContent("Saved"));
+  if (!serverPlan) {
+    throw new Error("nothing stored");
+  }
+  return serverPlan;
 }
+const saveStatus = () => screen.getByTestId("save-status").textContent;
 const allLocalStorage = () =>
   Object.keys(window.localStorage)
     .map((k) => `${k}=${window.localStorage.getItem(k)}`)
@@ -116,12 +152,10 @@ const layoutOf = (plan: ReleasePlan) => plan.epics.map((e) => [e.id, e.features.
 const milestoneOf = (plan: ReleasePlan, id: number) => plan.epics.flatMap((e) => e.features).find((f) => f.id === id)?.milestoneId;
 const epicTitles = () => [...screen.getByRole("region", { name: "Board" }).querySelectorAll(".epic .name > span:first-child")].map((e) => e.textContent);
 
-/** Counts autosaves of the plan key from now on (spyOn reuses an existing spy, so count from a baseline). */
+/** Counts the PUTs the fake server receives from now on. */
 function spyPlanSaves() {
-  const setItem = vi.spyOn(Storage.prototype, "setItem");
-  const count = () => setItem.mock.calls.filter(([k]) => k === STORAGE_KEY).length;
-  const start = count();
-  return () => count() - start;
+  const start = putCount;
+  return () => putCount - start;
 }
 
 /** Home → "Create from Azure DevOps" → On-Prem + URL + PAT → Connect → Area "Team A" → Create board. */
@@ -161,19 +195,20 @@ async function openSyncPreview(user: User) {
 async function planDashboardInNewMilestone(user: User): Promise<string> {
   // Releases mode: the gap "+" inserts a milestone directly (no menu).
   await user.click(screen.getByRole("button", { name: "Insert after MVP" }));
-  const plan = storedPlan();
+  const plan = await storedPlan(user);
   expect(plan.milestones).toHaveLength(2);
   const r2 = plan.milestones[1].id;
   await user.click(within(toolbar()).getByRole("tab", { name: "Table" }));
   await user.selectOptions(screen.getByLabelText("Milestone for Dashboard"), r2);
   await user.click(within(toolbar()).getByRole("tab", { name: "Board" }));
-  expect(milestoneOf(storedPlan(), 104)).toBe(r2);
+  expect(milestoneOf(await storedPlan(user), 104)).toBe(r2);
   return r2;
 }
 
 describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIMEOUT }, () => {
   beforeEach(() => {
     window.localStorage.clear();
+    disableAutosave();
     vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   });
   afterEach(() => {
@@ -190,7 +225,7 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
       await createFromAdo(user);
       expect(epicTitles()).toEqual(["Wave 1", "Wave 2", "Features without an Epic"]);
       const r2 = await planDashboardInNewMilestone(user);
-      const before = storedPlan();
+      const before = await storedPlan(user);
 
       const preview = await openSyncPreview(user);
       expect([...preview.querySelectorAll("summary")].map((s) => s.textContent)).toEqual([
@@ -212,9 +247,10 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
       const saves = spyPlanSaves();
       await user.click(within(preview).getByRole("button", { name: "Apply" }));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-      expect(saves()).toBe(1);
+      expect(saveStatus()).toBe("Unsaved changes");
 
-      const after = storedPlan();
+      const after = await storedPlan(user);
+      expect(saves()).toBe(1);
       expect(layoutOf(after)).toEqual([
         [101, [102, 106, 108]],
         [103, removeGone ? [104] : [105, 104]],
@@ -240,7 +276,8 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
       expect(toasts.some((t) => t.includes("Board synchronized with Azure DevOps"))).toBe(true);
       expect(toasts.some((t) => t.includes("Neither Custom.EstimatedSize nor Custom.FeatureSize exists"))).toBe(true);
       expect(allLocalStorage()).not.toContain(PAT);
-      expect(fetchMock).toHaveBeenCalledTimes(4);
+      // connect + backlog (create), backlog (sync); the other requests are plan POST/PUTs.
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/ado/"))).toHaveLength(3);
 
       // A second sync of the same backlog: up to date (when removed), or only the gone item left.
       fetchMock.mockClear();
@@ -252,7 +289,8 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
       }
       const saves2 = spyPlanSaves();
       await user.click(within(again).getByRole("button", { name: "Apply" }));
-      // Nothing at all changed → the reducer keeps the reference → no autosave.
+      // Nothing at all changed → the reducer keeps the reference → nothing to save.
+      expect(saveStatus()).toBe("Saved");
       expect(saves2()).toBe(0);
     });
   }
@@ -262,7 +300,7 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     mockNetwork([() => json(initialBacklog()), () => json(changedBacklog())]);
     renderApp("/release-plan");
     await createFromAdo(user);
-    const before = window.localStorage.getItem(STORAGE_KEY);
+    const before = serverPlan;
     const saves = spyPlanSaves();
 
     await user.click(within(toolbar()).getByRole("button", { name: "Sync from ADO" }));
@@ -273,7 +311,8 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     await user.click(within(preview).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(saves()).toBe(0);
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(before);
+    expect(saveStatus()).toBe("Saved");
+    expect(serverPlan).toBe(before);
     expect(epicTitles()).toEqual(["Wave 1", "Wave 2", "Features without an Epic"]);
     expect(toastTexts().some((t) => t.includes("Board synchronized"))).toBe(false);
   });
@@ -281,9 +320,10 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
   it("an old plan without connection info can't be synced and sends no request", async () => {
     const user = userEvent.setup();
     const old = samplePlan();
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(old));
-    const fetchMock = mockNetwork([() => json(initialBacklog())]);
-    renderApp("/release-plan/board");
+    const fetchMock = mockNetwork([() => json(initialBacklog())], old);
+    renderApp("/release-plan/1");
+    await screen.findByRole("region", { name: "Milestone summary" }, FIND);
+    fetchMock.mockClear();
 
     await user.click(within(toolbar()).getByRole("button", { name: "Sync from ADO" }));
     const dialog = syncDialog();
@@ -293,7 +333,7 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(storedPlan()).toEqual(old);
+    expect(saveStatus()).toBe("Saved");
   });
 
   it("a backlog 422 during sync shows inline in the dialog, keeps the PAT, opens no preview and changes nothing", async () => {
@@ -301,7 +341,7 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     mockNetwork([() => json(initialBacklog()), () => json({ errors: ["Unknown Area path: Proj\\Team A."] }, 422)]);
     renderApp("/release-plan");
     await createFromAdo(user);
-    const before = window.localStorage.getItem(STORAGE_KEY);
+    const before = serverPlan;
 
     await user.click(within(toolbar()).getByRole("button", { name: "Sync from ADO" }));
     const dialog = syncDialog();
@@ -311,7 +351,8 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     expect(within(dialog).getByLabelText("Personal Access Token")).toHaveValue(PAT);
     expect(shownValue(dialog, "Area path")).toBe("Proj\\Team A");
     expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe(before);
+    expect(serverPlan).toBe(before);
+    expect(saveStatus()).toBe("Saved");
     expect(allLocalStorage()).not.toContain(PAT);
   });
 
@@ -321,18 +362,18 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     const sprints = planReducer(created, { type: "setMode", mode: "sprints" })!;
     expect(sprints.mode).toBe("sprints");
     const withFlag: ReleasePlan = { ...sprints, flags: [{ id: "fl_1", name: "Go-live", date: "", afterMsId: sprints.milestones[0].id }] };
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(withFlag));
-    mockNetwork([() => json(changedBacklog())]);
-    renderApp("/release-plan/board");
+    mockNetwork([() => json(changedBacklog())], withFlag);
+    renderApp("/release-plan/1");
+    await screen.findByRole("region", { name: "Milestone summary" }, FIND);
     expect(screen.getByRole("radio", { name: /Sprints/ })).toHaveAttribute("aria-checked", "true");
 
     const preview = await openSyncPreview(user);
     await user.click(within(preview).getByRole("checkbox", { name: "Remove items no longer in scope" }));
     const saves = spyPlanSaves();
     await user.click(within(preview).getByRole("button", { name: "Apply" }));
+    const after = await storedPlan(user);
     expect(saves()).toBe(1);
 
-    const after = storedPlan();
     expect(after.mode).toBe("sprints");
     expect(after.milestones).toEqual(withFlag.milestones);
     expect(after.flags).toEqual(withFlag.flags);

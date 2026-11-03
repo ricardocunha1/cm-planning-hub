@@ -20,7 +20,8 @@ const formatDate = (iso: string): string => new Date(iso).toLocaleString();
  * when there is more than one page. Shows loading, empty and error (with Retry)
  * states. Delete asks {@link DeletePlanDialog}, then calls `deletePlan`, toasts
  * and refetches the page (one page back when it was the last item of a page
- * after the first); a failure shows an error toast. A list request is aborted
+ * after the first); a failure shows an error toast and refetches the page. A page past the end
+ * (with `total > 0`) moves to the last page. A list request is aborted
  * on unmount and when the page changes, and aborted responses are ignored.
  */
 export function PlanList() {
@@ -36,9 +37,15 @@ export function PlanList() {
     setState({ kind: "loading" });
     listPlans(page, controller.signal).then(
       (data) => {
-        if (!controller.signal.aborted) {
-          setState({ kind: "ready", data });
+        if (controller.signal.aborted) {
+          return;
         }
+        if (data.items.length === 0 && data.total > 0 && page > 1) {
+          // The page is past the end (rows were deleted elsewhere): go to the last page.
+          setPage(Math.max(1, Math.min(page - 1, Math.ceil(data.total / data.pageSize))));
+          return;
+        }
+        setState({ kind: "ready", data });
       },
       (exc: unknown) => {
         if (!controller.signal.aborted) {
@@ -69,6 +76,7 @@ export function PlanList() {
       }
     } catch (exc) {
       showError(errorMessages(exc), "Could not delete the plan");
+      retry(); // the row may be gone already (e.g. deleted elsewhere): show the real list
     } finally {
       deleting.current = false;
       setPendingDelete(null);

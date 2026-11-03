@@ -1,5 +1,5 @@
 // QA integration tests for Release Plan "Export PNG" (plans/release-plan-import-export.md, Phase 2).
-// Real board page through the router, real store with an in-memory PlanStorage, real useExportPng / drawBoardPng /
+// Real board page through the router, real store seeded with the plan, real useExportPng / drawBoardPng /
 // computeLayout / downloadBlob. Only the browser boundaries jsdom lacks are stubbed: Image (FakeImage), canvas
 // getContext/toBlob (RecordingContext via stubCanvas), URL.createObjectURL/revokeObjectURL and the anchor click.
 import { act, fireEvent, screen, within } from "@testing-library/react";
@@ -9,9 +9,8 @@ import { L, PALETTE } from "../lib/releasePlan/constants";
 import { computeLayout } from "../lib/releasePlan/layout";
 import { PNG_HEAD, pngScale } from "../lib/releasePlan/png";
 import { fmtDate } from "../lib/releasePlan/selectors";
-import type { PlanStorage } from "../lib/releasePlan/storage";
-import type { ReleasePlan } from "../lib/releasePlan/types";
 import { normalizePlan } from "../lib/releasePlan/validate";
+import type { ReleasePlan } from "../lib/releasePlan/types";
 import { FakeImage, RecordingContext, stubCanvas } from "../test/canvas";
 import { makeEpic, makePlan, samplePlan, sprintsPlan } from "../test/releasePlanFixtures";
 import { renderAt } from "../test/render";
@@ -29,24 +28,11 @@ const infoTexts = () => screen.queryAllByRole("status").map((s) => s.textContent
 const errorTexts = () => screen.queryAllByRole("alert").map((a) => a.textContent ?? "");
 const exportedDate = (d: Date) => d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 
-/** In-memory PlanStorage that counts saves (stands in for localStorage). */
-function memoryStorage(initial: ReleasePlan): PlanStorage & { saves: () => number; current: () => ReleasePlan | null } {
-  let stored: string | null = JSON.stringify(initial);
-  let saves = 0;
-  return {
-    load: () => (stored ? normalizePlan(JSON.parse(stored)) : null),
-    save: (plan) => {
-      saves += 1;
-      stored = JSON.stringify(plan);
-    },
-    saves: () => saves,
-    current: () => (stored ? (JSON.parse(stored) as ReleasePlan) : null),
-  };
-}
-
-function renderBoardPage(storage: PlanStorage) {
-  return renderAt("/release-plan/board", <ReleasePlanBoardPage />, {
-    planStorage: storage,
+function renderBoardPage(plan: ReleasePlan) {
+  return renderAt("/release-plan/:id", <ReleasePlanBoardPage />, {
+    initialPlan: plan,
+    initialPlanId: 1,
+    initialEntry: "/release-plan/1",
     routes: { "/release-plan": <ReleasePlanHomePage /> },
   });
 }
@@ -107,9 +93,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
     const ctx = new RecordingContext();
     const canvases = stubCanvas({ context: ctx, blob: PNG_BLOB });
     const plan = samplePlan();
-    const storage = memoryStorage(plan);
-    renderBoardPage(storage);
-    const savesBefore = storage.saves();
+    renderBoardPage(plan);
 
     await user.click(exportButton());
     expect(await screen.findByText("PNG exported")).toBeInTheDocument();
@@ -135,15 +119,14 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
 
     expect(errorTexts()).toEqual([]);
     expect(exportButton()).toBeEnabled();
-    expect(storage.saves()).toBe(savesBefore);
-    expect(storage.current()).toEqual(plan);
+    expect(screen.getByTestId("save-status")).toHaveTextContent("Saved");
   });
 
   it("Table view: Export PNG still draws the board (not the table) and downloads the .png", async () => {
     const user = userEvent.setup();
     const ctx = new RecordingContext();
     stubCanvas({ context: ctx, blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(samplePlan()));
+    renderBoardPage(samplePlan());
 
     await user.click(screen.getByRole("tab", { name: "Table" }));
     expect(screen.getByRole("region", { name: "Table" })).toBeInTheDocument();
@@ -161,7 +144,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
     const user = userEvent.setup();
     const ctx = new RecordingContext();
     stubCanvas({ context: ctx, blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(samplePlan()));
+    renderBoardPage(samplePlan());
 
     const name = screen.getByLabelText("Plan name");
     await user.clear(name);
@@ -191,7 +174,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
     const user = userEvent.setup();
     const ctx = new RecordingContext();
     stubCanvas({ context: ctx, blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(sprintsPlan()));
+    renderBoardPage(sprintsPlan());
     expect(screen.getByLabelText("Plan name")).toHaveValue("Sprint Plan");
 
     await user.click(exportButton());
@@ -213,7 +196,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
     const layout = computeLayout(plan);
     expect(pngScale(layout.width, layout.height + PNG_HEAD)).toBeNull();
     const canvases = stubCanvas({ context: new RecordingContext(), blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(plan));
+    renderBoardPage(plan);
 
     // Queries are scoped (toolbar / toast text) instead of page-wide *ByRole: role queries over the whole wide
     // board are what made this test slow under the parallel suite. fireEvent for the same reason.
@@ -232,7 +215,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
   it("no 2D context shows 'Could not export the PNG.' and downloads nothing; a retry with a working canvas succeeds", async () => {
     const user = userEvent.setup();
     stubCanvas({ context: null, blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(samplePlan()));
+    renderBoardPage(samplePlan());
 
     await user.click(exportButton());
     expect(await screen.findByRole("alert")).toHaveTextContent(FAILED);
@@ -253,7 +236,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
     const user = userEvent.setup();
     const ctx = new RecordingContext();
     stubCanvas({ context: ctx, blob: null });
-    renderBoardPage(memoryStorage(samplePlan()));
+    renderBoardPage(samplePlan());
 
     await user.click(exportButton());
     expect(await screen.findByRole("alert")).toHaveTextContent(FAILED);
@@ -271,7 +254,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
       throw new Error("boom");
     };
     stubCanvas({ context: ctx, blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(samplePlan()));
+    renderBoardPage(samplePlan());
 
     await user.click(exportButton());
     expect(await screen.findByRole("alert")).toHaveTextContent(FAILED);
@@ -285,7 +268,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
     FakeImage.fail = true;
     const ctx = new RecordingContext();
     stubCanvas({ context: ctx, blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(samplePlan()));
+    renderBoardPage(samplePlan());
 
     await user.click(exportButton());
     expect(await screen.findByText("PNG exported")).toBeInTheDocument();
@@ -300,7 +283,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
     FakeImage.hold = true;
     const ctx = new RecordingContext();
     stubCanvas({ context: ctx, blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(samplePlan()));
+    renderBoardPage(samplePlan());
 
     fireEvent.click(exportButton());
     await settle();
@@ -324,7 +307,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
   it("a double click while the export runs produces a single download (button disabled meanwhile)", async () => {
     FakeImage.hold = true;
     const canvases = stubCanvas({ context: new RecordingContext(), blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(samplePlan()));
+    renderBoardPage(samplePlan());
 
     fireEvent.click(exportButton());
     fireEvent.click(exportButton());
@@ -342,7 +325,7 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
     FakeImage.hold = true;
     stubCanvas({ context: new RecordingContext(), blob: PNG_BLOB });
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const view = renderBoardPage(memoryStorage(samplePlan()));
+    const view = renderBoardPage(samplePlan());
 
     fireEvent.click(exportButton());
     await settle();

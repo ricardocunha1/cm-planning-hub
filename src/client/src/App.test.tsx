@@ -1,19 +1,18 @@
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
+import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import type { DataSource } from "./lib/monteCarlo/types";
 import { ForecastProvider } from "./monteCarloStore";
 import { excelSource } from "./test/monteCarloFixtures";
 
 function renderApp(path: string, dataSource: DataSource | null = null) {
+  const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   render(
     <ToastProvider>
       <ForecastProvider initialDataSource={dataSource}>
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ForecastProvider>
     </ToastProvider>,
   );
