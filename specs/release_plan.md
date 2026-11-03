@@ -1,5 +1,11 @@
 # Planning Hub — Release Plan
 
+> **Note (2026-11-03):** the JSON import/export requirements below (creating a
+> board from a JSON file, the JSON import/export option and the JSON card on
+> the entry page) are **superseded by `specs/release_plan_persistence`**.
+> Boards are now created from Azure DevOps only and stored in the database.
+> PNG export and everything else still apply.
+
 This application will create interactive drag-and-drop boards to create release plans, based on the backlog of selectable CM Projects.
 
 ## Requirements

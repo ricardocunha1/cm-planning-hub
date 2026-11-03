@@ -7,3 +7,14 @@ tag: 0.3.0 # Shared by both images. Update when planninghub-client/-server are r
 public_http_address: cm-planning-hub.apps.rhos.cm-mes.dev
 # Hosts the server may call for Azure DevOps (comma-separated; "*.x" = any subdomain of x)
 adoAllowedHosts: "dev.azure.com,tfs-projects.cmf.criticalmanufacturing.com"
+# PostgreSQL for Release Plan persistence.
+postgres:
+  image: postgres:17
+  # Credentials come from an existing Secret that this chart does NOT create.
+  # Create it in the namespace before installing, e.g.:
+  #   oc -n cm-planning-hub create secret generic cm-planning-hub-db-secret \
+  #     --from-literal=username=planninghub --from-literal=password=<password>
+  secret:
+    name: cm-planning-hub-db-secret
+    usernameKey: username
+    passwordKey: password

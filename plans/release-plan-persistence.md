@@ -78,10 +78,12 @@ infra files: `docker-compose*.yml`, `.github/workflows/deploy.yml` and
   Postgres pod reads it as `POSTGRES_USER` / `POSTGRES_PASSWORD`, and the
   server reads it as `DB_USER` / `DB_PASSWORD`. **The server builds the
   connection string** from `DB_USER`, `DB_PASSWORD`, `DB_HOST` and `DB_PORT`
-  (the last two are plain env vars) and the fixed database name `planninghub`. Values:
-  `postgres.username` (default `planninghub`), `postgres.password`
-  (**required**: `helm install … --set postgres.password=…`, via `required`,
-  so an install without it fails).
+  (the last two are plain env vars) and the fixed database name `planninghub`.
+  **The chart does not create the Secret** (changed 2026-11-03 at the user's
+  request): it must exist in the namespace beforehand, and the chart only
+  references it via `postgres.secret.name` (default
+  `cm-planning-hub-db-secret`), `postgres.secret.usernameKey` (`username`) and
+  `postgres.secret.passwordKey` (`password`).
 - **`project_type` stores codes `onprem` / `cloud`** (same as
   `PlanSource.kind`). The client shows "On Prem" / "Collaboration Hub".
 - **Plan names are not unique.** They are trimmed, 1–200 characters.
@@ -563,18 +565,18 @@ Agent: `frontend-developer`.
   4. The deletions and the icon test rename were staged with `git rm` / `git mv`; nothing is committed.
 
 ## Phase 5: Helm chart, README and spec notes
-Status: Not started
+Status: Complete
 
 Agent: `backend-developer` (Helm, infra exception). The main session does
 the README/spec edits after QA (docs). **Do not edit `AGENTS.md`.**
 
-- [ ] `helm/chart/values.yaml`: add `postgres: {image: postgres:17, username: planninghub, password: ""}` (no `database` value: it is always `planninghub`) (with a comment that the password must be set with `--set postgres.password=…`).
-- [ ] `helm/chart/templates/cm-planning-hub-db-secret.yaml`: Secret `cm-planning-hub-db-secret` with keys `username` and `password`, where the password is `{{ required "postgres.password is required" .Values.postgres.password }}`.
-- [ ] `cm-planning-hub-db-deployment.yaml`: 1 replica, `postgres:17`, env `POSTGRES_USER` / `POSTGRES_PASSWORD` from the Secret, `POSTGRES_DB=planninghub`, `PGDATA=/var/lib/postgresql/data/pgdata`, an `emptyDir` mounted at `/var/lib/postgresql/data`, readiness/liveness `pg_isready` exec probes, and resource requests/limits. No PVC.
-- [ ] `cm-planning-hub-db-service.yaml`: ClusterIP `cm-planning-hub-db-service`, port 5432.
-- [ ] Server deployment: env `DB_HOST=cm-planning-hub-db-service`, `DB_PORT=5432` and `DB_USER` / `DB_PASSWORD` via `secretKeyRef` to the Secret.
-- [ ] Bump `tag` in `values.yaml` per the release convention only if the user asks (leave it otherwise).
-- [ ] Main session: README — Release Plan section (saved plans list, autosave/save, no JSON), local dev (`docker compose up -d db`, DB env vars, `TEST_DATABASE_URL`), and deployment (`--set postgres.password`, the data loss on DB pod restart). Add a note to `specs/release_plan.md` that its JSON import/export requirements are superseded by `specs/release_plan_persistence`.
+- [x] `helm/chart/values.yaml`: add `postgres: {image: postgres:17, username: planninghub, password: ""}` (no `database` value: it is always `planninghub`) (with a comment that the password must be set with `--set postgres.password=…`).
+- [x] `helm/chart/templates/cm-planning-hub-db-secret.yaml`: Secret `cm-planning-hub-db-secret` with keys `username` and `password`, where the password is `{{ required "postgres.password is required" .Values.postgres.password }}`.
+- [x] `cm-planning-hub-db-deployment.yaml`: 1 replica, `postgres:17`, env `POSTGRES_USER` / `POSTGRES_PASSWORD` from the Secret, `POSTGRES_DB=planninghub`, `PGDATA=/var/lib/postgresql/data/pgdata`, an `emptyDir` mounted at `/var/lib/postgresql/data`, readiness/liveness `pg_isready` exec probes, and resource requests/limits. No PVC.
+- [x] `cm-planning-hub-db-service.yaml`: ClusterIP `cm-planning-hub-db-service`, port 5432.
+- [x] Server deployment: env `DB_HOST=cm-planning-hub-db-service`, `DB_PORT=5432` and `DB_USER` / `DB_PASSWORD` via `secretKeyRef` to the Secret.
+- [x] (Not done: not requested) Bump `tag` in `values.yaml` per the release convention only if the user asks (leave it otherwise).
+- [x] Main session: README — Release Plan section (saved plans list, autosave/save, no JSON), local dev (`docker compose up -d db`, DB env vars, `TEST_DATABASE_URL`), and deployment (`--set postgres.password`, the data loss on DB pod restart). Add a note to `specs/release_plan.md` that its JSON import/export requirements are superseded by `specs/release_plan_persistence`.
 
 ### Verification Plan
 - `docker run --rm -v "$PWD/helm/chart":/chart alpine/helm template /chart --set postgres.password=x` → renders without errors and includes the db Deployment, Service and Secret, and the server env with `secretKeyRef`.
@@ -583,10 +585,91 @@ the README/spec edits after QA (docs). **Do not edit `AGENTS.md`.**
 - `git diff --stat AGENTS.md` → empty.
 
 ### Phase Summary
-_(write when phase completes)_
+**Done (2026-11-03).** Agents: `backend-developer` (Helm, infra exception), `qa-engineer` (review plus render and container checks). The main session wrote the README and spec note. 1 Develop ↔ QA cycle: QA passed with no Blocker or Major findings.
+
+- **Helm** (`helm/chart`):
+  - **`values.yaml`:** new `postgres: {image: postgres:17, username: planninghub, password: ""}`, with comments that the password is required and that data is lost on a DB pod restart. `tag` is unchanged.
+  - **New `cm-planning-hub-db-secret.yaml`:** an Opaque Secret with `stringData` keys `username` and `password`. The password goes through `required "postgres.password is required"`.
+  - **New `cm-planning-hub-db-deployment.yaml`:**
+    - 1 replica, `Recreate`, `app: cm-planning-hub-db`.
+    - `POSTGRES_USER` and `POSTGRES_PASSWORD` come from the Secret; `POSTGRES_DB=planninghub`; `PGDATA=/var/lib/postgresql/data/pgdata`.
+    - An `emptyDir` at `/var/lib/postgresql/data`, and no PVC. No `runAsUser`, so OpenShift assigns the UID.
+    - `pg_isready` exec probes (readiness 5 s / 5 s, liveness 30 s / 10 s), and 100m/256Mi → 500m/512Mi.
+  - **New `cm-planning-hub-db-service.yaml`:** ClusterIP on 5432.
+  - **Server Deployment:** `DB_HOST=cm-planning-hub-db-service`, `DB_PORT="5432"`, and `DB_USER` / `DB_PASSWORD` via `secretKeyRef`.
+  - **Checksum annotations:** both pod templates have a `checksum/db-secret` annotation, so a credential change rolls both pods. For the DB pod that means its data is wiped (documented in the README).
+  - Without the password, the `required` error is raised from the server template's checksum `include`. The message is still "postgres.password is required".
+- **README:**
+  - The intro, Navigation and Release Plan sections now describe creating from ADO with a plan name, the "Saved release plans" list, `/release-plan/<id>` links, and Saving (the Autosave toggle, the Save button, the status, the unsaved-changes guard, last write wins). The JSON and localStorage text is removed.
+  - Architecture mentions PostgreSQL and Alembic.
+  - The Compose section covers the `postgres` service.
+  - Deployment covers `--set postgres.password` and a data-loss warning.
+  - Local dev covers `docker compose up -d postgres` and the `DB_*` env.
+  - Tests cover `TEST_DATABASE_URL` and the warning that DB tests wipe `release_plans`.
+- **`specs/release_plan.md`:** a note at the top that its JSON import/export requirements are superseded by `specs/release_plan_persistence`.
+- **Compose:** the user renamed the compose service `db` → `postgres`, committed in `5943714`. The Phase 1 notes that say `docker compose up -d db` now mean `docker compose up -d postgres`.
+- **Verification (main session):**
+  - `helm template --set postgres.password=x`: OK; it renders the Secret, the DB Deployment and Service, and the server `secretKeyRef` env.
+  - Without the password: fails with "postgres.password is required".
+  - `helm lint`: 0 failed. kubeconform (QA): 8 resources, all valid.
+  - QA ran `postgres:17` as UID 1000680000 / GID 0 with `--cap-drop ALL` and an empty data dir: initdb, `pg_isready` and `psql` all worked.
+  - The password appears only in the Secret.
+  - `compileall`: OK.
+  - `pytest` with `TEST_DATABASE_URL` (a temporary compose `postgres`, removed afterwards): 871 passed / 1 skipped.
+  - Client: `tsc -b` OK, `vite build` OK, 83 files / 885 tests pass.
+  - `git diff --stat AGENTS.md`: empty.
+- **Open Minors (not blocking):**
+  1. The image is the short name `postgres:17`. CRI-O short-name policy or Docker Hub rate limits may need `docker.io/library/postgres:17` or a mirrored `{{ .Values.registry }}` image.
+  2. There is no `startupProbe`; a slow initdb gets about 60 s before the liveness probe kills it. Any restart re-runs initdb on the emptyDir.
+  3. The probes hard-code `planninghub` / `127.0.0.1`, which is consistent with the fixed DB name.
+  4. Nothing orders the DB and server rollouts. The server waits 60 s for the DB and otherwise crash-loops until it is ready, which heals itself.
+  5. Not tested on a real OpenShift cluster: `fsGroup`/emptyDir behaviour and the short-name policy.
+
+- **Follow-up (2026-11-03, user request): the chart no longer creates the Secret.**
+  - Removed `cm-planning-hub-db-secret.yaml`, `postgres.username` / `postgres.password` and the `checksum/db-secret` annotations (they hashed the removed template).
+  - New values `postgres.secret.{name,usernameKey,passwordKey}` (defaults `cm-planning-hub-db-secret`, `username`, `password`); the DB and server Deployments use them in their `secretKeyRef`s.
+  - The Secret must be created out of band before installing. A credential change no longer rolls the pods; restart them manually.
+  - Verified: `helm template` renders 3 Deployments, 3 Services and the Ingress (no Secret) without any `--set`; `helm lint` 0 failed.
 
 ## Final Recap
-_(write when all phases complete: summary of the entire piece of work)_
+Release Plan boards are now stored in PostgreSQL instead of JSON files and the browser's localStorage. Completed 2026-11-03 over 5 phases.
+
+- **Server:**
+  - SQLAlchemy 2.0 async + asyncpg, and the `release_plans` table (Alembic `0001`), migrated at startup with a DB wait.
+  - The `/api/plan` CRUD router: paginated list (10 per page, `updatedAt DESC`), get, create (201), update (last write wins), delete (204).
+  - 422 `{errors}` for name, projectName and state validation (including the 5 MiB limit and NUL); 404 for unknown or out-of-range ids; 503 when the DB is unavailable.
+  - `/api/health` stays DB-independent.
+  - DB tests run against a real Postgres when `TEST_DATABASE_URL` is set; CI sets it.
+- **Client:**
+  - The JSON import/export and the localStorage plan storage are removed.
+  - `/release-plan` has the ADO create card, with a required Plan name, and a paginated "Saved release plans" list with delete.
+  - The board is at `/release-plan/:id` on a data router.
+  - Autosave (3 s debounce, a per-browser toggle) or a manual Save, with a status indicator.
+  - An unsaved-changes guard (Save / Discard / Cancel) and `beforeunload`.
+  - Sync from ADO and Export PNG are unchanged.
+- **Infra:**
+  - Compose has a `postgres` service.
+  - The Deploy workflow has a `postgres:17` service container for tests.
+  - The Helm chart has a Postgres Deployment and Service on an emptyDir. Credentials come from a pre-existing Secret referenced by name and keys (the chart doesn't create it).
+- **Tests:** server 738 → 871 (with a DB); client 823 → 885 (after the JSON features were removed). Each phase has unit tests from the developers and integration tests from QA.
+- **Known limitations:**
+  - DB data is lost when the DB pod restarts (no PVC; accepted in the spec).
+  - There is no concurrency control beyond last write wins.
+  - Local DB tests wipe the compose stack's plans.
+  - Open Minors are listed in each Phase Summary.
 
 ## Deployment Plan
-_(write when all phases complete: step-by-step deployment instructions)_
+1. **Merge and build:** merge `feature/release-plan-persistence` to `main`. Run the manual **Deploy** GitHub workflow. It runs the server tests against its `postgres:17` service, then the client tests, builds and pushes both images with the GitVersion tag, and tags the commit.
+2. **Set the tag:** set `tag` in `helm/chart/values.yaml` to the new version (one tag for both images).
+3. **Create the DB Secret** (the chart doesn't): `oc -n cm-planning-hub create secret generic cm-planning-hub-db-secret --from-literal=username=planninghub --from-literal=password=<strong password>`. Keep the password in a secret store.
+4. **Check the registry:** make sure the cluster can pull `postgres:17`. If short names or Docker Hub are blocked, use `--set postgres.image=docker.io/library/postgres:17` or a mirrored image.
+5. **Install or upgrade the release:** `helm upgrade --install cm-planning-hub helm/chart`. Changing the Secret later needs `oc rollout restart` of both Deployments, which wipes all plans.
+6. **Verify the rollout:**
+   - `oc -n cm-planning-hub get pods` shows the db, server and client pods Ready. The server waits up to 60 s for the DB and runs the migrations. If the DB comes up later, the server restarts until it succeeds.
+   - `curl https://<public_http_address>/api/health` returns `{"status":"ok"}`.
+   - `curl https://<public_http_address>/api/plan` returns `{"items":[],"total":0,…}`.
+   - In the UI, create a plan from ADO, change it, reload `/release-plan/<id>` and check that the change is still there.
+7. **Tell users:**
+   - Plans are lost whenever the DB pod restarts.
+   - Old JSON files and boards in the browser can't be imported. Recreate those boards from Azure DevOps.
+

@@ -11,8 +11,7 @@ Manufacturing (CM) projects. It currently offers two tools:
   completion date for each confidence level.
 - **Release Plan** (Planning) — an interactive drag-and-drop board for
   planning which Epics and Features ship in which release or sprint. Boards
-  are created from an imported JSON plan or from Azure DevOps, and can be
-  saved back to JSON.
+  are created from Azure DevOps and saved in a PostgreSQL database.
 
 ## Navigation
 
@@ -31,10 +30,10 @@ sidebar, and a main content area.
   next to the Monte Carlo step breadcrumb opens the in-app help. Results and
   validation data are kept in memory only, so reloading the Confirm or
   Results page sends you back to `/monte-carlo`.
-- **Release Plan (`/release-plan`)** — the entry page lets you choose how
-  to create a board (**Import a JSON file** or **Create from Azure DevOps**) and, when a board already exists, **Continue last
-  board**. The board itself is at `/release-plan/board`; opening it with no
-  plan sends you back to `/release-plan`. See
+- **Release Plan (`/release-plan`)** — the entry page has the **Create from
+  Azure DevOps** card and the list of **Saved release plans**. Each board has
+  its own address, `/release-plan/<id>`, so it can be reloaded or shared as a
+  link; an unknown or deleted plan sends you back to `/release-plan`. See
   [How the Release Plan tool works](#how-the-release-plan-tool-works).
 
 ## How the Monte Carlo tool works
@@ -99,19 +98,26 @@ app reports the specific problem instead of failing silently.
 
 The Release Plan tool lays out a plan's Epics and Features on a board:
 Epics are columns, and each Feature sits in the row (band) of the milestone
-it is planned for, or in **Unplanned**. Plans can be imported from a JSON
-file or directly from Azure DevOps.
+it is planned for, or in **Unplanned**. Plans are created from Azure DevOps
+and stored on the server, so they are available from any browser.
 
 ### Creating a board
 
-- **Import a JSON file** — pick a previously saved plan and click **Create
-  board**. The file is validated first and any problem is shown in the
-  dialog. If the file is valid and a board already exists, you are asked to
-  **Replace the current board?**, since any changes to it will be lost.
 - **Create from Azure DevOps** — enter the connection details (Azure DevOps
   source, Project URL and Area or Iteration Path) and a valid **Personal
-  Access Token**, then click **Create board** to build the board from the
-  project's backlog.
+  Access Token**, and give the plan a **Plan name** (pre-filled with
+  `<project> – Feature Release Plan`, up to 200 characters). Click **Create
+  board** to build the board from the project's backlog; the plan is saved
+  and opened at `/release-plan/<id>`.
+
+### Saved release plans
+
+The entry page lists the stored plans, most recently modified first, 10 per
+page (**Previous** / **Next**). Each row shows the plan name (a link that
+opens the board), the project (`On Prem · <project>` or
+`Collaboration Hub · <project>`), and when it was created and last modified.
+**Delete** asks for confirmation and removes the plan permanently. Plan names
+don't have to be unique.
 
 ### The board
 
@@ -140,17 +146,22 @@ file or directly from Azure DevOps.
   milestone filters, and a milestone select per Feature.
 - **Work-item details** — click a Feature card or Epic title to see its
   state, size, milestone, Iteration Path and description.
-- **Save Plan / Load Plan** — **Save Plan** downloads the plan as a JSON
-  file (`<name>_<YYYY-MM-DD>.json`) that can be imported again later;
-  **Load Plan** imports one, with the same validation and **Replace the
-  current board?** confirmation as **Import a JSON file**.
+- **Sync from ADO / Export PNG** — refresh the board from Azure DevOps, or
+  download an image of the board.
 
-### Autosave
+### Saving
 
-Every change is saved automatically in the browser, so you can close the
-page and resume the board later in the same browser (**Continue last
-board** on the entry page). To move a plan to another browser or keep a
-copy, use **Save Plan** / **Load Plan**.
+- **Autosave** (toolbar toggle, on by default) saves the plan to the server
+  3 seconds after the last change. The setting is remembered per browser and
+  applies to every plan.
+- With autosave off, use the **Save** button. It also appears when a save
+  fails, so you can retry.
+- The toolbar shows the status: **Saved**, **Unsaved changes**, **Saving…**
+  or **Save failed**.
+- Leaving the board with unsaved changes asks you to **Save**, **Discard**
+  or **Cancel**; reloading or closing the tab shows the browser's own
+  warning.
+- If two people edit the same plan, the last save wins.
 
 ## Architecture
 
@@ -159,6 +170,8 @@ copy, use **Save Plan** / **Load Plan**.
 The app is split into two tiers under `src/`:
 
 - **`src/server`** — FastAPI API (includes Pandas/NumPy libraries for simulation logic), port 8000.
+  It stores Release Plan boards in **PostgreSQL** and applies the migrations at
+  startup.
 - **`src/client`** — React + TypeScript single-page app (Vite, Tailwind),
   served by nginx in production. nginx proxies `/api` to the server, so the
   browser only ever talks to one origin. The dashboard's tools come from a
@@ -173,7 +186,8 @@ docker compose down
 ```
 
 The client container listens on 8080 (non-root nginx) and reaches the
-server through `API_UPSTREAM` (default `http://server:8000`).
+server through `API_UPSTREAM` (default `http://server:8000`). The `postgres`
+service holds the release plans.
 
 ## Building and deploying
 
@@ -190,14 +204,32 @@ with that tag, and tags the commit. The Helm chart in `helm/chart` deploys
 both (set `tag` in `values.yaml`); the ingress sends `/api` to the server and
 everything else to the client.
 
+The chart also deploys PostgreSQL (`cm-planning-hub-db-deployment` /
+`-service`, image `postgres.image`, default `postgres:17`). The database
+credentials come from an **existing Secret that the chart does not create**.
+Create it in the namespace before installing:
+
+```bash
+oc -n cm-planning-hub create secret generic cm-planning-hub-db-secret \
+  --from-literal=username=planninghub --from-literal=password=<password>
+```
+
 ## Running locally (development)
 
 Requires Python 3.12 and Node 22 (both are set up by the devcontainer,
-which also installs the server and client dependencies).
+which also installs the server and client dependencies), and a PostgreSQL
+database for the Release Plan API.
 
 ```bash
+# Database — postgres:17 on port 5432 (from inside the devcontainer use DB_HOST=172.17.0.1)
+docker compose up -d postgres
+
 # Server — http://localhost:8000
+# DB settings: DB_HOST (default localhost), DB_PORT (5432), DB_USER, DB_PASSWORD;
+# the database name is always planninghub. Migrations run at startup
+# (DB_MIGRATE_ON_STARTUP=true, waiting up to DB_STARTUP_TIMEOUT_SECONDS=60).
 cd src/server
+export DB_USER=planninghub DB_PASSWORD=planninghub
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 
@@ -214,6 +246,18 @@ cd src/server && pytest              # server (or `pytest src/server` from the r
 cd src/client && npm test -- --run   # client (Vitest)
 cd src/client && npm run build       # type-check + production build
 ```
+
+The server's database tests are skipped unless `TEST_DATABASE_URL` is set
+(the Deploy workflow runs them against a `postgres:17` service). To run them
+locally:
+
+```bash
+docker compose up -d postgres
+TEST_DATABASE_URL=postgresql+asyncpg://planninghub:planninghub@172.17.0.1:5432/planninghub pytest src/server
+```
+
+They use the same `planninghub` database and empty the `release_plans`
+table, so they wipe the plans of a running compose stack.
 
 See `AGENTS.md` for architecture notes and the AI-agent workflow (used by
 both OpenCode and Claude Code) and `specs/` for the full functional

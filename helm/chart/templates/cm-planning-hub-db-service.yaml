@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cm-planning-hub-db-service
+  namespace: {{ .Values.namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app: cm-planning-hub-db
+  ports:
+    - port: 5432
+      targetPort: 5432

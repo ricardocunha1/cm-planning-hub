@@ -21,6 +21,20 @@ spec:
           env:
             - name: ADO_ALLOWED_HOSTS
               value: {{ .Values.adoAllowedHosts | quote }}
+            - name: DB_HOST
+              value: cm-planning-hub-db-service
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secret.name }}
+                  key: {{ .Values.postgres.secret.usernameKey }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.secret.name }}
+                  key: {{ .Values.postgres.secret.passwordKey }}
           readinessProbe:
             httpGet:
               path: /api/health
