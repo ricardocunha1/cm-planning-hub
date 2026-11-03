@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RecordingContext } from "../../test/canvas";
 import { makeEpic, makeFeature, makeFlag, makeMilestone, makePlan, samplePlan, sprintsPlan } from "../../test/releasePlanFixtures";
-import { L, LF, OK_GREEN, PALETTE, SIZE_COLORS, STATE_COLORS } from "./constants";
+import { L, LF, OK_GREEN, PALETTE, PALETTES, SIZE_COLORS, STATE_COLORS } from "./constants";
 import { computeFlippedLayout, computeLayout } from "./layout";
 import { drawBoardPng, PNG_HEAD, PNG_MAX_AREA, PNG_MAX_SIDE, pngScale, type PngLogo, wrap } from "./png";
 import { fmtDate } from "./selectors";
@@ -317,5 +317,40 @@ describe("drawBoardPng (flipped)", () => {
     expect(ctx.ops("translate").map((c) => c.args)).toContainEqual([cx, LF.TOP + 6 + tw / 2]);
     expect(ctx.text(label).args).toEqual([label, -tw / 2 + 24, -6]);
     expect(ctx.ops("save").length).toBe(ctx.ops("restore").length);
+  });
+});
+
+describe("drawBoardPng palettes", () => {
+  it("keeps the dark palette as the default and the original look", () => {
+    expect(PALETTE).toBe(PALETTES.dark);
+    expect(PALETTES.dark).toMatchObject({ panel: "#152A47", ink: "#E9EFF7", bandA: "#12243D", unplanned: "#2A2617" });
+  });
+
+  it("defines the same keys for both themes and keeps the brand colors", () => {
+    expect(Object.keys(PALETTES.light).sort()).toEqual(Object.keys(PALETTES.dark).sort());
+    expect(PALETTES.light.navy).toBe(PALETTES.dark.navy);
+    expect(PALETTES.light.gold).toBe(PALETTES.dark.gold);
+    expect(PALETTES.light.panel).not.toBe(PALETTES.dark.panel);
+  });
+
+  it.each([
+    ["standard", computeLayout],
+    ["flipped", computeFlippedLayout],
+  ] as const)("draws the %s board with the palette it is given", (_name, compute) => {
+    const plan = samplePlan();
+    const layout = compute(plan);
+    const light = PALETTES.light;
+    const ctx = new RecordingContext();
+    drawBoardPng(ctx, plan, layout, { scale: 1, now: NOW, logo: null, palette: light });
+
+    const fills = new Set(ctx.calls.map((c) => c.fillStyle));
+    expect(ctx.ops("fillRect")[0]).toMatchObject({ args: [0, 0, layout.width, layout.height + PNG_HEAD], fillStyle: light.panel });
+    expect(ctx.ops("fillRect")[1]).toMatchObject({ args: [0, 0, layout.width, PNG_HEAD], fillStyle: light.navy });
+    for (const color of [light.bandA, light.bandB, light.unplanned, light.bandLine, light.line, light.ink, light.muted, light.epicbg]) {
+      expect(fills).toContain(color);
+    }
+    for (const color of [PALETTES.dark.panel, PALETTES.dark.bandA, PALETTES.dark.ink, PALETTES.dark.muted]) {
+      expect(fills).not.toContain(color);
+    }
   });
 });

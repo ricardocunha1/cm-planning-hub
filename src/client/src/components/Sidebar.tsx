@@ -14,14 +14,14 @@ const FOCUS_RING = "focus:outline-none focus-visible:ring-2 focus-visible:ring-[
 function GroupDivider({ id, label, collapsed }: { id: string; label: string; collapsed: boolean }) {
   return (
     <div className={`flex items-center gap-2 px-3 py-2 ${collapsed ? "md:gap-0 md:px-1" : ""}`}>
-      <span className="h-px flex-1 bg-slate-600" aria-hidden="true" />
+      <span className="h-px flex-1 bg-surface-strong" aria-hidden="true" />
       <span
         id={id}
-        className={`whitespace-nowrap text-xs font-semibold uppercase tracking-wider text-slate-400 ${collapsed ? "md:sr-only" : ""}`}
+        className={`whitespace-nowrap text-xs font-semibold uppercase tracking-wider text-fg-subtle ${collapsed ? "md:sr-only" : ""}`}
       >
         {label}
       </span>
-      <span className={`h-px flex-1 bg-slate-600 ${collapsed ? "md:hidden" : ""}`} aria-hidden="true" />
+      <span className={`h-px flex-1 bg-surface-strong ${collapsed ? "md:hidden" : ""}`} aria-hidden="true" />
     </div>
   );
 }
@@ -51,7 +51,7 @@ export function Sidebar({ collapsed = false, onToggleCollapsed }: SidebarProps) 
             aria-controls={NAV_ID}
             aria-label={toggleLabel}
             title={toggleLabel}
-            className={`rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-800/60 hover:text-slate-100 ${FOCUS_RING}`}
+            className={`rounded p-1.5 text-fg-subtle transition-colors hover:bg-surface-raised/60 hover:text-fg ${FOCUS_RING}`}
           >
             <SidebarToggleIcon className={`h-5 w-5 transition-transform ${collapsed ? "rotate-180" : ""}`} />
           </button>
@@ -71,7 +71,7 @@ export function Sidebar({ collapsed = false, onToggleCollapsed }: SidebarProps) 
                       `flex items-center gap-3 rounded px-3 py-2 text-sm font-medium transition-colors ${FOCUS_RING} ${
                         collapsed ? "md:justify-center md:gap-0 md:px-0" : ""
                       } ${
-                        isActive ? "bg-slate-800 text-[color:var(--cm-teal)]" : "text-slate-300 hover:bg-slate-800/60 hover:text-slate-100"
+                        isActive ? "bg-surface-raised text-accent-teal" : "text-fg-muted hover:bg-surface-raised/60 hover:text-fg"
                       }`
                     }
                   >

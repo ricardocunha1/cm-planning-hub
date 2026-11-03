@@ -65,16 +65,16 @@ export function ImportExcelModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative w-full max-w-lg rounded-lg border border-slate-700 bg-slate-900 shadow-xl"
+        className="relative w-full max-w-lg rounded-lg border border-line-strong bg-surface shadow-xl"
       >
-        <div className="px-6 py-4 border-b border-slate-800">
+        <div className="px-6 py-4 border-b border-line">
           <h2 id={titleId} className="text-lg font-semibold">
             Import an Excel file
           </h2>
         </div>
         <div className="px-6 py-5 space-y-3 text-sm">
-          <p className="text-slate-300">Select the sprint history extract (.xlsx) to run the simulation on.</p>
-          <label htmlFor={inputId} className="block font-medium text-slate-200">
+          <p className="text-fg-muted">Select the sprint history extract (.xlsx) to run the simulation on.</p>
+          <label htmlFor={inputId} className="block font-medium text-fg-soft">
             Sprint history file
           </label>
           <input
@@ -85,35 +85,35 @@ export function ImportExcelModal({
             onChange={onChange}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
-            className="block w-full text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-slate-100 hover:file:bg-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
+            className="block w-full text-sm text-fg-muted file:mr-3 file:rounded file:border-0 file:bg-surface-overlay file:px-3 file:py-1.5 file:text-fg hover:file:bg-surface-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
           />
-          <p className="text-slate-400" data-testid="import-excel-file-name">
+          <p className="text-fg-subtle" data-testid="import-excel-file-name">
             {file ? (
               <>
-                Selected file: <span className="font-medium text-slate-200">{file.name}</span>
+                Selected file: <span className="font-medium text-fg-soft">{file.name}</span>
               </>
             ) : (
               "No file selected."
             )}
           </p>
           {error && (
-            <p id={errorId} role="alert" className="text-red-400">
+            <p id={errorId} role="alert" className="text-danger">
               {error}
             </p>
           )}
         </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-800">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-line">
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
+            className="rounded border border-line-bold px-4 py-2 text-sm font-medium text-fg-soft hover:bg-surface-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onContinue}
-            className="rounded px-4 py-2 text-sm font-medium hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+            className="rounded px-4 py-2 text-sm font-medium hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
             style={{ backgroundColor: "var(--cm-light-blue)", color: "#04101d" }}
           >
             Continue

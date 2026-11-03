@@ -30,9 +30,9 @@ export function ConfirmPage() {
 
   return (
     <MonteCarloLayout pageTitle="Confirm Sprint Data" currentStep={2}>
-      <div className="rounded-lg border border-slate-800 bg-slate-900 overflow-x-auto mb-6">
+      <div className="rounded-lg border border-line bg-surface overflow-x-auto mb-6">
         <table className="min-w-full text-sm text-left">
-          <thead className="text-slate-400 border-b border-slate-800">
+          <thead className="text-fg-subtle border-b border-line">
             <tr>
               <th className="px-4 py-2">Sprint</th>
               <th className="px-4 py-2">Items Resolved</th>
@@ -44,7 +44,7 @@ export function ConfirmPage() {
           </thead>
           <tbody>
             {validation.summary.map((row) => (
-              <tr key={row.Sprint} className="border-b border-slate-800/60">
+              <tr key={row.Sprint} className="border-b border-line/60">
                 <td className="px-4 py-2">{row.Sprint}</td>
                 <td className="px-4 py-2">{row["Items Resolved"]}</td>
                 <td className="px-4 py-2">{row["Story Points"]}</td>

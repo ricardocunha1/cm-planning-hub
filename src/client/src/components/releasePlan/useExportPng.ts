@@ -1,9 +1,11 @@
 import { useCallback, useRef, useState } from "react";
 import logoUrl from "../../assets/cmlogo.svg";
+import { PALETTES } from "../../lib/releasePlan/constants";
 import { downloadBlob, fileBase } from "../../lib/releasePlan/exportFile";
 import { computeBoardLayout, type BoardOrientation } from "../../lib/releasePlan/layout";
 import { drawBoardPng, PNG_HEAD, pngScale, type PngLogo } from "../../lib/releasePlan/png";
 import type { ReleasePlan } from "../../lib/releasePlan/types";
+import { useTheme } from "../../themeStore";
 import { useToast } from "../Toast";
 
 /** Error shown when the board exceeds the canvas limits even at scale 1. */
@@ -41,10 +43,11 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
  * canvas limits, a missing 2D context, a `null` blob or a drawing error show an error toast and
  * download nothing. `exporting` is true while an export runs; further calls
  * are ignored meanwhile. `orientation` (default `standard`) picks the layout
- * drawn, so the image matches the board shown.
+ * drawn, so the image matches the board shown; the colors follow the active theme.
  */
 export function useExportPng(plan: ReleasePlan, orientation: BoardOrientation = "standard"): { exporting: boolean; exportPng: () => Promise<void> } {
   const { showError, showInfo } = useToast();
+  const { theme } = useTheme();
   const [exporting, setExporting] = useState(false);
   const running = useRef(false);
 
@@ -71,7 +74,7 @@ export function useExportPng(plan: ReleasePlan, orientation: BoardOrientation = 
         showError([PNG_FAILED]);
         return;
       }
-      drawBoardPng(ctx, plan, layout, { scale, now, logo });
+      drawBoardPng(ctx, plan, layout, { scale, now, logo, palette: PALETTES[theme] });
       const blob = await canvasToBlob(canvas);
       if (!blob) {
         showError([PNG_FAILED]);
@@ -85,7 +88,7 @@ export function useExportPng(plan: ReleasePlan, orientation: BoardOrientation = 
       running.current = false;
       setExporting(false);
     }
-  }, [plan, orientation, showError, showInfo]);
+  }, [plan, orientation, theme, showError, showInfo]);
 
   return { exporting, exportPng };
 }
