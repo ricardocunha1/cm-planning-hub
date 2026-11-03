@@ -87,8 +87,9 @@ push both images) → git tag.
   - `release-plan-board.md`, `release-plan-import-export.md`, `release-plan-ado.md` — Release Plan features reference.
 
   When working on a plan, follow its "For Future Agents" section (tick
-  checkboxes, update phase status, write the Phase Summary). New multi-step
-  work gets a new plan (see the `real-work` skill).
+  checkboxes, update phase status, write the Phase Summary). Create a new
+  plan only when the user explicitly asks for one or references a planning
+  skill such as `real-work` (see **Planning** below).
 
 ### Server — `src/server`
 
@@ -136,17 +137,52 @@ file carries both Claude (`name`, `tools`) and OpenCode (`mode`,
 | `frontend-developer` | `src/client`, `specs/` | React/TS changes + **unit tests** only |
 | `qa-engineer` | review of the change, tests, `specs/` | **integration / end-to-end tests** only; never production code |
 
-The **main session is the coordinator**: it plans, delegates, verifies and
-reports. For any feature or fix that changes `src/server` or `src/client`:
+Work is split into two separate steps, each started by its own user
+prompt: **Planning** (only when asked) and **Implementation**. Never move
+from one to the other in the same turn.
 
-1. **Plan** — read the request, the relevant `specs/` and `plans/`. Split
-   the work into a backend task and a frontend task. If the change crosses
-   the API, write the API contract once (route, request/response shapes,
-   422 `{errors: [str]}` cases) and give the identical contract to both
-   developers. Record a baseline (`git status --short` and the current
-   pass/fail state of the verification commands) so pre-existing failures
-   are not blamed on, or hidden by, this work. In a fresh worktree run
-   `cd src/client && npm ci` first.
+**Models.** Planning runs in the main conversation, on its model. The
+implementation subagents run on **Sonnet 5.5**. That default lives in each
+harness's config, not in the agent files:
+
+- Claude Code: `.claude/settings.json` →
+  `env.CLAUDE_CODE_SUBAGENT_MODEL = "claude-sonnet-5-5"`.
+- OpenCode: `opencode.json` → `agent.<name>.model =
+  "anthropic/claude-sonnet-5-5"` (add an entry when adding an agent).
+
+### Planning (only on request)
+
+Run this only when the user explicitly asks for a plan or references a
+planning skill such as `real-work`. The main session writes the plan
+itself (no developer or QA subagents):
+
+1. Read the request, the relevant `specs/` and existing `plans/`.
+2. Create the plan in `plans/<name>.md` following the `real-work` skill:
+   phases with checkboxes, the split into backend and frontend tasks, and,
+   if the change crosses the API, the API contract (route,
+   request/response shapes, 422 `{errors: [str]}` cases).
+3. Stop and hand the plan to the user for review: give its path and a
+   short summary. Don't change `src/`, don't write tests and don't start
+   implementing. Revise the plan if the user asks for changes.
+
+Implementation of a plan starts only when the user later asks for it.
+
+### Implementation
+
+The **main session is the coordinator**: it prepares, delegates, verifies
+and reports. For any feature or fix that changes `src/server` or
+`src/client` (implementing a reviewed plan, or a direct request without a
+plan):
+
+1. **Prepare** — read the request, the plan (if any; follow its "For
+   Future Agents" section), the relevant `specs/` and `plans/`. Split the
+   work into a backend task and a frontend task. If the change crosses the
+   API, take the API contract from the plan or write it once, and give the
+   identical contract to both developers. Record a baseline
+   (`git status --short` and the current pass/fail state of the
+   verification commands) so pre-existing failures are not blamed on, or
+   hidden by, this work. In a fresh worktree run `cd src/client && npm ci`
+   first.
 2. **Develop** — launch `backend-developer` and `frontend-developer` **in
    parallel** (one message, two subagent calls). Give each: the user's goal,
    its own task, the shared API contract, the relevant spec sections and the
@@ -169,11 +205,12 @@ reports. For any feature or fix that changes `src/server` or `src/client`:
    developer, re-verify the Develop exit criteria, then re-run QA in full.
    At most 3 Develop ↔ QA cycles; if defects remain, stop and report to the
    user. Minor findings don't block; list them in the final report.
-5. **Wrap up** — update the plan (checkboxes, Phase Summary), including
-   docs (`AGENTS.md`, `README.md`) when the architecture or usage changed.
-   Report per phase: agents used, files changed, tests added (unit vs.
-   integration/e2e), verification results, Develop ↔ QA iterations and
-   outstanding minor findings. Don't commit unless asked.
+5. **Wrap up** — update the plan if there is one (checkboxes, phase
+   status, Phase Summary) and the docs (`AGENTS.md`, `README.md`) when the
+   architecture or usage changed. Report per phase: agents used, files
+   changed, tests added (unit vs. integration/e2e), verification results,
+   Develop ↔ QA iterations and outstanding minor findings. Don't commit
+   unless asked.
 
 While coordinating, the main session does not write production code or
 tests itself, and uses the shell only for verification (tests, builds,
