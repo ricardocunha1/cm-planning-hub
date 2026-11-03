@@ -12,7 +12,7 @@ import { ReleasePlanProvider } from "./releasePlanStore";
 /**
  * Route table: hub home at `/`, the Monte Carlo flow under `/monte-carlo` (data source choice at `/monte-carlo`,
  * parameters form at `/monte-carlo/input`, then `/confirm` and `/results`), Release Plan under `/release-plan`
- * (`/release-plan/board` for the board), anything else redirects home. Mounts the `ReleasePlanProvider`
+ * (`/release-plan/:id` and, for now, `/release-plan/board` for the board), anything else redirects home. Mounts the `ReleasePlanProvider`
  * (localStorage autosave) around the routes.
  */
 export function App() {
@@ -27,6 +27,7 @@ export function App() {
         <Route path="/monte-carlo/results" element={<ResultsPage />} />
         <Route path="/release-plan" element={<ReleasePlanHomePage />} />
         <Route path="/release-plan/board" element={<ReleasePlanBoardPage />} />
+        <Route path="/release-plan/:id" element={<ReleasePlanBoardPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ReleasePlanProvider>

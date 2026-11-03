@@ -3,10 +3,8 @@ import { sourceInfo } from "../../lib/releasePlan/selectors";
 import type { ReleasePlan } from "../../lib/releasePlan/types";
 import { zoomLabel } from "../../lib/releasePlan/zoom";
 import { useReleasePlan } from "../../releasePlanStore";
-import { DownloadIcon } from "../icons/DownloadIcon";
 import { FlipIcon } from "../icons/FlipIcon";
 import { SyncIcon } from "../icons/SyncIcon";
-import { UploadIcon } from "../icons/UploadIcon";
 import { CommitInput } from "./CommitInput";
 import { ModeSwitch } from "./ModeSwitch";
 
@@ -17,9 +15,8 @@ export type BoardView = "board" | "table";
  * Board toolbar: editable plan name + source line, Board/Table tabs,
  * Releases/Sprints switch, zoom (− 100% + Fit) and the "Flip board" toggle
  * (`aria-pressed` while flipped; both hidden in Table view), then a
- * spacer and the "Sync from ADO" / "Load Plan" / "Save Plan" buttons (each
- * with a decorative sync/upload/download icon before its label) and the primary "Export PNG" button,
- * all shown in both views.
+ * spacer and the "Sync from ADO" button (with a decorative sync icon before its
+ * label) and the primary "Export PNG" button, both shown in both views.
  */
 export function BoardToolbar({
   plan,
@@ -32,8 +29,6 @@ export function BoardToolbar({
   orientation,
   onFlip,
   onSync,
-  onLoad,
-  onSave,
   onExportPng,
   exporting,
 }: {
@@ -50,10 +45,6 @@ export function BoardToolbar({
   onFlip: () => void;
   /** "Sync from ADO": opens the Azure DevOps connection form (the page owns the sync flow). */
   onSync: () => void;
-  /** "Load Plan": opens the import modal (the page owns it). */
-  onLoad: () => void;
-  /** "Save Plan": downloads the plan as JSON. */
-  onSave: () => void;
   /** "Export PNG": downloads an image of the board. */
   onExportPng: () => void;
   /** An export is running: "Export PNG" is disabled. */
@@ -109,14 +100,6 @@ export function BoardToolbar({
       <button type="button" className="btn withIcon" onClick={onSync}>
         <SyncIcon className="btnIcon" />
         Sync from ADO
-      </button>
-      <button type="button" className="btn withIcon" onClick={onLoad}>
-        <UploadIcon className="btnIcon" />
-        Load Plan
-      </button>
-      <button type="button" className="btn withIcon" onClick={onSave}>
-        <DownloadIcon className="btnIcon" />
-        Save Plan
       </button>
       <button type="button" className="btn primary" onClick={onExportPng} disabled={exporting}>
         Export PNG

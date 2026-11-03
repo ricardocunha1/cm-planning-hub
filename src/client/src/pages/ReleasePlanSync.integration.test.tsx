@@ -1,7 +1,7 @@
 // QA integration tests for "Sync from ADO" (plans/release-plan-ado.md, Phase 4).
 // Real App routes, real pages, real store with the real localStorage autosave, real adoApi;
 // only `fetch` is mocked at the network boundary (synthetic responses, never a real Azure DevOps).
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +16,12 @@ import { normalizePlan } from "../lib/releasePlan/validate";
 import { ForecastProvider } from "../monteCarloStore";
 import { makeBacklog, makeConnectResponse, makeConnection, makeEpicItem, makeFeatureItem } from "../test/adoFixtures";
 import { samplePlan, sequentialIds } from "../test/releasePlanFixtures";
+
+// The home page's saved-plans list is not under test here (and must not count as a request).
+vi.mock("../lib/releasePlan/planApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/releasePlan/planApi")>()),
+  listPlans: vi.fn(async () => ({ items: [], total: 0, page: 1, pageSize: 10 })),
+}));
 
 const PAT = "qa-sync-secret-pat-9876543210";
 const CANONICAL = "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/My%20Proj";
@@ -79,8 +85,12 @@ function changedBacklog(): AdoBacklog {
 
 function mockNetwork(backlogs: (() => Response)[]) {
   let backlogCalls = 0;
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url === "/api/plan") {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return json({ id: 42, ...body, createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z" }, 201);
+    }
     if (url === "/api/ado/connect") {
       return json(makeConnectResponse({ project: PROJECT, projectUrl: CANONICAL }));
     }
@@ -126,7 +136,7 @@ async function createFromAdo(user: User) {
   const tree = await within(dialog).findByRole("tree", { name: "Area path" }, FIND);
   await user.click(within(tree).getByRole("treeitem", { name: /^Team A/ }));
   await user.click(within(dialog).getByRole("button", { name: "Create board" }));
-  await waitFor(() => expect(location()).toBe("/release-plan/board"), FIND);
+  await waitFor(() => expect(location()).toBe("/release-plan/42"), FIND);
 }
 
 /** Read-only value shown next to a label in the sync dialog. */
@@ -230,7 +240,7 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
       expect(toasts.some((t) => t.includes("Board synchronized with Azure DevOps"))).toBe(true);
       expect(toasts.some((t) => t.includes("Neither Custom.EstimatedSize nor Custom.FeatureSize exists"))).toBe(true);
       expect(allLocalStorage()).not.toContain(PAT);
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
 
       // A second sync of the same backlog: up to date (when removed), or only the gone item left.
       fetchMock.mockClear();
@@ -268,7 +278,7 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     expect(toastTexts().some((t) => t.includes("Board synchronized"))).toBe(false);
   });
 
-  it("an old plan without connection info can't be synced; importing a saved JSON with a connection from home restores it for Sync", async () => {
+  it("an old plan without connection info can't be synced and sends no request", async () => {
     const user = userEvent.setup();
     const old = samplePlan();
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(old));
@@ -284,29 +294,6 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(storedPlan()).toEqual(old);
-
-    // A JSON saved from an ADO board, imported from the home page, brings its connection along.
-    const linked = planFromBacklog(initialBacklog(), makeConnection({ source: "onprem", projectUrl: CANONICAL }), sequentialIds());
-    const file = new File([JSON.stringify({ ...linked, name: "Linked Board" })], "linked.json", { type: "application/json" });
-    await user.click(within(screen.getByRole("navigation", { name: "Hub navigation" })).getByRole("link", { name: "Release Plan" }));
-    await user.click(await screen.findByRole("button", { name: /Import a JSON file/ }, FIND));
-    const importDialog = screen.getByRole("dialog", { name: "Import a JSON file" });
-    await user.upload(within(importDialog).getByLabelText("Release plan file"), file);
-    await user.click(within(importDialog).getByRole("button", { name: "Create board" }));
-    await user.click(await screen.findByRole("button", { name: "Replace" }, FIND));
-    await waitFor(() => expect(location()).toBe("/release-plan/board"), FIND);
-    expect(storedPlan().source).toMatchObject({ kind: "onprem", projectUrl: CANONICAL, scopeType: "area", scopePath: "Proj\\Team A" });
-
-    const preview = await openSyncPreview(user);
-    expect(preview).toHaveTextContent("The board is up to date with Azure DevOps.");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
-      source: "onprem",
-      projectUrl: CANONICAL,
-      scopeType: "area",
-      scopePath: "Proj\\Team A",
-      pat: PAT,
-    });
   });
 
   it("a backlog 422 during sync shows inline in the dialog, keeps the PAT, opens no preview and changes nothing", async () => {
@@ -326,46 +313,6 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe(before);
     expect(allLocalStorage()).not.toContain(PAT);
-  });
-
-  it("Save Plan JSON after a sync carries the source/connection fields and never the PAT", async () => {
-    const user = userEvent.setup();
-    const blobs: Blob[] = [];
-    Object.assign(URL, {
-      createObjectURL: (blob: Blob) => {
-        blobs.push(blob);
-        return "blob:plan";
-      },
-      revokeObjectURL: () => undefined,
-    });
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    mockNetwork([() => json(initialBacklog()), () => json(changedBacklog())]);
-    renderApp("/release-plan");
-    await createFromAdo(user);
-    const preview = await openSyncPreview(user);
-    await user.click(within(preview).getByRole("button", { name: "Apply" }));
-
-    fireEvent.click(within(toolbar()).getByRole("button", { name: "Save Plan" }));
-    expect(blobs).toHaveLength(1);
-    const text = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.readAsText(blobs[0]);
-    });
-    expect(text).not.toContain(PAT);
-    const saved = JSON.parse(text) as ReleasePlan;
-    expect(saved.source).toEqual({
-      system: "Azure DevOps",
-      project: "My Proj",
-      scope: "Area Path: Proj\\Team A",
-      fetchedAt: "2026-10-30T08:00:00Z",
-      kind: "onprem",
-      projectUrl: CANONICAL,
-      scopeType: "area",
-      scopePath: "Proj\\Team A",
-    });
-    expect(Object.keys(saved.source).some((k) => /^(pat|token|personalAccessToken)$/i.test(k))).toBe(false);
-    expect(saved.iterations).toEqual(changedBacklog().iterations);
   });
 
   it("a Sprints-mode plan: sprints, flags and every Feature's sprint survive; new Features Unplanned; iterations replaced", async () => {

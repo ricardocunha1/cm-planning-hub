@@ -187,18 +187,11 @@ describe("Release Plan Export PNG integration", { timeout: BOARD_TEST_TIMEOUT_MS
     expect(ctx.texts()).toEqual(expect.arrayContaining(["3 Features", "0 Features"]));
   });
 
-  it("after Load Plan → Replace, Export PNG uses the loaded plan (Sprints mode with a dated flag)", async () => {
+  it("Export PNG of a Sprints plan with a dated flag", async () => {
     const user = userEvent.setup();
     const ctx = new RecordingContext();
     stubCanvas({ context: ctx, blob: PNG_BLOB });
-    renderBoardPage(memoryStorage(samplePlan()));
-
-    await user.click(screen.getByRole("button", { name: "Load Plan" }));
-    const dialog = screen.getByRole("dialog", { name: "Load a plan" });
-    await user.upload(within(dialog).getByLabelText("Release plan file"), new File([JSON.stringify(sprintsPlan())], "s.json", { type: "application/json" }));
-    await user.click(within(dialog).getByRole("button", { name: "Load" }));
-    const confirm = await screen.findByRole("dialog", { name: "Replace the current board?" });
-    await user.click(within(confirm).getByRole("button", { name: "Replace" }));
+    renderBoardPage(memoryStorage(sprintsPlan()));
     expect(screen.getByLabelText("Plan name")).toHaveValue("Sprint Plan");
 
     await user.click(exportButton());

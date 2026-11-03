@@ -45,6 +45,7 @@ export function renderAt(
     "/monte-carlo/results": <p>results page</p>,
     "/release-plan": <p>release plan home page</p>,
     "/release-plan/board": <p>release plan board page</p>,
+    "/release-plan/:id": <p>release plan board page</p>,
     ...routes,
     [path]: element,
   };

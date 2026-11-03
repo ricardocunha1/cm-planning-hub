@@ -1,43 +1,55 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { listPlans } from "../lib/releasePlan/planApi";
 import { useReleasePlan } from "../releasePlanStore";
 import { makeBacklog, makeConnectResponse } from "../test/adoFixtures";
-import { samplePlan } from "../test/releasePlanFixtures";
 import { renderAt } from "../test/render";
 import { ReleasePlanHomePage } from "./ReleasePlanHomePage";
+
+vi.mock("../lib/releasePlan/planApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/releasePlan/planApi")>()),
+  listPlans: vi.fn(),
+}));
 
 const adoCard = () => screen.getByRole("button", { name: /Create from Azure DevOps/ });
 const location = () => screen.getByTestId("location").textContent;
 
-/** Board stub that shows the store's plan name (and its Epic titles). */
+/** Board stub that shows the store's plan name, Epic titles and server id. */
 function BoardStub() {
-  const { plan } = useReleasePlan();
+  const { plan, planId } = useReleasePlan();
   return (
     <>
       <p>board: {plan?.name ?? "none"}</p>
+      <p data-testid="board-id">{String(planId)}</p>
       <p data-testid="board-epics">{plan?.epics.map((e) => e.title).join(" | ")}</p>
     </>
   );
 }
 
-const routes = { "/release-plan/board": <BoardStub /> };
-const planFile = (name: string) =>
-  new File([JSON.stringify(samplePlan({ name }))], "plan.json", { type: "application/json" });
+const routes = { "/release-plan/:id": <BoardStub /> };
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-/** Stubs `fetch` for the two ADO routes with synthetic fixtures. */
-function mockAdo(backlog = makeBacklog()) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
-    String(input) === "/api/ado/connect" ? json(makeConnectResponse()) : json(backlog),
-  );
+/** Stubs `fetch` for the ADO routes (fixtures) and `POST /api/plan` (201, id 42). */
+function mockServer(backlog = makeBacklog(), plan?: () => Response) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    if (url === "/api/ado/connect") return json(makeConnectResponse());
+    if (url === "/api/ado/backlog") return json(backlog);
+    if (url === "/api/plan") {
+      if (plan) return plan();
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return json({ id: 42, ...body, createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z" }, 201);
+    }
+    throw new Error(`unexpected ${url}`);
+  });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
 
-/** Runs the ADO modal: Collaboration Hub, URL, PAT, Connect, "Team A", Create board. */
-async function createFromAdo(user: ReturnType<typeof userEvent.setup>) {
+/** Runs the ADO modal: Collaboration Hub, URL, PAT, Connect, "Team A", then (optionally renamed) Create board. */
+async function createFromAdo(user: ReturnType<typeof userEvent.setup>, name?: string) {
   await user.click(adoCard());
   const dialog = screen.getByRole("dialog", { name: "Create from Azure DevOps" });
   await user.click(within(dialog).getByRole("radio", { name: "Collaboration Hub" }));
@@ -45,32 +57,52 @@ async function createFromAdo(user: ReturnType<typeof userEvent.setup>) {
   await user.type(within(dialog).getByLabelText("Personal Access Token"), "pat-value");
   await user.click(within(dialog).getByRole("button", { name: "Connect" }));
   await user.click(within(await screen.findByRole("tree", { name: "Area path" })).getByRole("treeitem", { name: /^Team A/ }));
+  if (name !== undefined) {
+    await user.clear(within(dialog).getByLabelText("Plan name"));
+    await user.type(within(dialog).getByLabelText("Plan name"), name);
+  }
   await user.click(within(dialog).getByRole("button", { name: "Create board" }));
 }
 
-async function importFile(user: ReturnType<typeof userEvent.setup>, file: File) {
-  await user.click(screen.getByRole("button", { name: /Import a JSON file/ }));
-  await user.upload(screen.getByLabelText("Release plan file"), file);
-  await user.click(screen.getByRole("button", { name: "Create board" }));
-}
-
 describe("ReleasePlanHomePage", () => {
+  beforeEach(() => {
+    vi.mocked(listPlans).mockReset();
+    vi.mocked(listPlans).mockResolvedValue({
+      items: [
+        {
+          id: 3,
+          name: "Saved one",
+          projectType: "cloud",
+          projectName: "Proj",
+          createdAt: "2026-11-01T08:00:00Z",
+          updatedAt: "2026-11-02T08:00:00Z",
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+    });
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
     window.localStorage.clear();
   });
 
-  it("renders inside the Release Plan layout with its title", () => {
+  it("renders inside the Release Plan layout with its title", async () => {
     renderAt("/release-plan", <ReleasePlanHomePage />);
     expect(screen.queryByRole("heading", { name: "Release Plan" })).not.toBeInTheDocument();
     expect(document.title).toBe("Planning Hub – Release Plan");
+    await screen.findByRole("table");
   });
 
-  it("shows the Azure DevOps card enabled (no Coming soon badge)", () => {
+  it("shows the Azure DevOps card and the saved plans list, with no JSON import or Continue section", async () => {
     renderAt("/release-plan", <ReleasePlanHomePage />);
     expect(adoCard()).toBeEnabled();
-    expect(adoCard()).not.toHaveAttribute("aria-disabled");
-    expect(adoCard()).not.toHaveTextContent("Coming soon");
+    expect(screen.getByRole("heading", { name: "Saved release plans" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Saved one" })).toHaveAttribute("href", "/release-plan/3");
+    expect(screen.queryByRole("button", { name: /JSON/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Continue last board" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Last board" })).not.toBeInTheDocument();
   });
 
   it("opens and closes the Azure DevOps modal from its card", async () => {
@@ -83,99 +115,39 @@ describe("ReleasePlanHomePage", () => {
     expect(location()).toBe("/release-plan");
   });
 
-  it("creates a board from Azure DevOps: stores it, opens the board and toasts 'Plan loaded' and the warnings", async () => {
+  it("creates a plan: stores it with its id, opens /release-plan/<id> and toasts 'Plan created' and the warnings", async () => {
     const user = userEvent.setup();
     const warning = "Neither Custom.EstimatedSize nor Custom.FeatureSize exists in this project; sizes are empty.";
-    mockAdo(makeBacklog({ warnings: [warning] }));
+    const fetchMock = mockServer(makeBacklog({ warnings: [warning] }));
     renderAt("/release-plan", <ReleasePlanHomePage />, { routes });
     await createFromAdo(user);
     expect(await screen.findByText("board: Proj – Feature Release Plan")).toBeInTheDocument();
+    expect(screen.getByTestId("board-id")).toHaveTextContent("42");
     expect(screen.getByTestId("board-epics")).toHaveTextContent("Wave 1 | Wave 2 | Features without an Epic");
-    expect(location()).toBe("/release-plan/board");
+    expect(location()).toBe("/release-plan/42");
     const toasts = screen.getAllByRole("status").map((el) => el.textContent);
-    expect(toasts.some((t) => t?.includes("Plan loaded: Proj – Feature Release Plan"))).toBe(true);
+    expect(toasts.some((t) => t?.includes("Plan created: Proj – Feature Release Plan"))).toBe(true);
     expect(toasts.some((t) => t?.includes(warning))).toBe(true);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(["/api/ado/connect", "/api/ado/backlog", "/api/plan"]);
   });
 
-  it("asks before replacing a plan with an Azure DevOps board; Cancel keeps the modal and the plan", async () => {
+  it("uses the name typed in the modal", async () => {
     const user = userEvent.setup();
-    mockAdo();
-    renderAt("/release-plan", <ReleasePlanHomePage />, { routes, initialPlan: samplePlan() });
+    mockServer();
+    renderAt("/release-plan", <ReleasePlanHomePage />, { routes });
+    await createFromAdo(user, "Custom name");
+    expect(await screen.findByText("board: Custom name")).toBeInTheDocument();
+    expect(screen.getAllByRole("status").some((el) => el.textContent?.includes("Plan created: Custom name"))).toBe(true);
+  });
+
+  it("keeps the modal open with the inline error when saving fails", async () => {
+    const user = userEvent.setup();
+    mockServer(makeBacklog(), () => json({ errors: ["The release plan database is unavailable."] }, 503));
+    renderAt("/release-plan", <ReleasePlanHomePage />, { routes });
     await createFromAdo(user);
-    const confirm = await screen.findByRole("dialog", { name: "Replace the current board?" });
-    expect(confirm).toHaveTextContent('"Sample Release Plan" will be replaced by "Proj – Feature Release Plan"');
-    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
-    expect(screen.getByRole("dialog", { name: "Create from Azure DevOps" })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog", { name: "Create from Azure DevOps" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("The release plan database is unavailable.");
     expect(location()).toBe("/release-plan");
-    await user.click(screen.getByRole("button", { name: "Create board" }));
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
-    expect(await screen.findByText("board: Proj – Feature Release Plan")).toBeInTheDocument();
-  });
-
-  it("opens and closes the import modal from the JSON card", async () => {
-    const user = userEvent.setup();
-    renderAt("/release-plan", <ReleasePlanHomePage />);
-    await user.click(screen.getByRole("button", { name: /Import a JSON file/ }));
-    expect(screen.getByRole("dialog", { name: "Import a JSON file" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("has no Continue action without a plan", () => {
-    renderAt("/release-plan", <ReleasePlanHomePage />);
-    expect(screen.queryByRole("link", { name: "Continue last board" })).not.toBeInTheDocument();
-  });
-
-  it("imports a valid file: stores it, opens the board and toasts 'Plan loaded: <name>'", async () => {
-    const user = userEvent.setup();
-    renderAt("/release-plan", <ReleasePlanHomePage />, { routes });
-    await importFile(user, planFile("Imported"));
-    expect(await screen.findByText("board: Imported")).toBeInTheDocument();
-    expect(location()).toBe("/release-plan/board");
-    expect(screen.getByRole("status")).toHaveTextContent("Plan loaded: Imported");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("keeps the modal open with the inline error for an invalid file", async () => {
-    const user = userEvent.setup();
-    renderAt("/release-plan", <ReleasePlanHomePage />, { routes });
-    await importFile(user, new File(["{bad"], "plan.json", { type: "application/json" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not read the file: it is not valid JSON.");
-    expect(screen.getByRole("dialog", { name: "Import a JSON file" })).toBeInTheDocument();
-    expect(location()).toBe("/release-plan");
-  });
-
-  it("shows Continue last board with the plan name and source info, linking to the board", async () => {
-    const user = userEvent.setup();
-    renderAt("/release-plan", <ReleasePlanHomePage />, { routes, initialPlan: samplePlan() });
-    const section = screen.getByRole("region", { name: "Last board" });
-    expect(within(section).getByText("Sample Release Plan")).toBeInTheDocument();
-    expect(within(section).getByText(/Azure DevOps · Area Path: Proj\\Team/)).toBeInTheDocument();
-    await user.click(screen.getByRole("link", { name: "Continue last board" }));
-    expect(location()).toBe("/release-plan/board");
-    expect(screen.getByText("board: Sample Release Plan")).toBeInTheDocument();
-  });
-
-  it("asks 'Replace the current board?' before overwriting; Cancel keeps the current plan", async () => {
-    const user = userEvent.setup();
-    renderAt("/release-plan", <ReleasePlanHomePage />, { routes, initialPlan: samplePlan() });
-    await importFile(user, planFile("Other"));
-    const confirm = await screen.findByRole("dialog", { name: "Replace the current board?" });
-    expect(confirm).toHaveTextContent('"Sample Release Plan" will be replaced by "Other"');
-    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog", { name: "Replace the current board?" })).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Import a JSON file" })).toBeInTheDocument();
-    expect(location()).toBe("/release-plan");
-    expect(within(screen.getByRole("region", { name: "Last board" })).getByText("Sample Release Plan")).toBeInTheDocument();
-  });
-
-  it("replaces the current plan after confirmation", async () => {
-    const user = userEvent.setup();
-    renderAt("/release-plan", <ReleasePlanHomePage />, { routes, initialPlan: samplePlan() });
-    await importFile(user, planFile("Other"));
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
-    expect(await screen.findByText("board: Other")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Plan loaded: Other");
   });
 });

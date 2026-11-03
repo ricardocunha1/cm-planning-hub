@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ADO_CONNECTION_KEY } from "../../lib/releasePlan/constants";
+import type { ReleasePlan } from "../../lib/releasePlan/types";
 import { makeBacklog, makeConnectResponse } from "../../test/adoFixtures";
 import { AdoConnectModal } from "./AdoConnectModal";
 
@@ -12,8 +13,8 @@ type Handler = (body: Record<string, unknown>, init: RequestInit) => Response | 
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-/** Stubs `fetch`, routing `/api/ado/connect` and `/api/ado/backlog` to the handlers (200 fixtures by default). */
-function mockFetch(handlers: { connect?: Handler; backlog?: Handler } = {}): Mock {
+/** Stubs `fetch`, routing `/api/ado/connect`, `/api/ado/backlog` and `POST /api/plan` to the handlers (200 fixtures by default). */
+function mockFetch(handlers: { connect?: Handler; backlog?: Handler; plan?: Handler } = {}): Mock {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -22,6 +23,9 @@ function mockFetch(handlers: { connect?: Handler; backlog?: Handler } = {}): Moc
     }
     if (url === "/api/ado/backlog") {
       return handlers.backlog ? handlers.backlog(body, init) : json(makeBacklog());
+    }
+    if (url === "/api/plan") {
+      return handlers.plan ? handlers.plan(body, init) : json({ id: 7, ...body, projectType: body.projectType, createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z" }, 201);
     }
     throw new Error(`unexpected ${url}`);
   });
@@ -43,14 +47,15 @@ function hanging(signals: AbortSignal[]): Handler {
 
 function renderModal() {
   const onClose = vi.fn();
-  const onBacklog = vi.fn();
-  const view = render(<AdoConnectModal open onClose={onClose} onBacklog={onBacklog} />);
-  return { onClose, onBacklog, ...view };
+  const onCreated = vi.fn();
+  const view = render(<AdoConnectModal open onClose={onClose} onCreated={onCreated} />);
+  return { onClose, onCreated, ...view };
 }
 
 const urlInput = () => screen.getByLabelText("Project URL");
 const patInput = () => screen.getByLabelText("Personal Access Token");
 const connectButton = () => screen.getByRole("button", { name: /^(Connect|Connecting…)$/ });
+const nameInput = () => screen.getByLabelText("Plan name");
 const submitButton = (name = "Create board") => screen.getByRole("button", { name });
 
 async function fillAndConnect(user: ReturnType<typeof userEvent.setup>, { source = "Collaboration Hub", url = URL_OK, pat = PAT } = {}) {
@@ -69,7 +74,7 @@ describe("AdoConnectModal", () => {
   });
 
   it("renders nothing when closed", () => {
-    render(<AdoConnectModal open={false} onClose={vi.fn()} onBacklog={vi.fn()} />);
+    render(<AdoConnectModal open={false} onClose={vi.fn()} onCreated={vi.fn()} />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -179,20 +184,19 @@ describe("AdoConnectModal", () => {
   it("enables submit only once a path is picked, then fetches the backlog", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch();
-    const { onBacklog } = renderModal();
+    const { onCreated } = renderModal();
     await fillAndConnect(user);
     const tree = await screen.findByRole("tree", { name: "Area path" });
     expect(submitButton()).toBeDisabled();
     await user.click(within(tree).getByRole("treeitem", { name: /^Team A/ }));
     expect(submitButton()).toBeEnabled();
     await user.click(submitButton());
-    await vi.waitFor(() => expect(onBacklog).toHaveBeenCalledTimes(1));
-    expect(onBacklog).toHaveBeenCalledWith(makeBacklog(), {
-      source: "cloud",
-      projectUrl: "https://dev.azure.com/org/Proj",
-      scopeType: "area",
-      scopePath: "Proj\\Team A",
-    });
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    const [id, plan, warnings] = onCreated.mock.calls[0] as [number, ReleasePlan, string[]];
+    expect(id).toBe(7);
+    expect(plan.name).toBe("Proj – Feature Release Plan");
+    expect(plan.source).toMatchObject({ kind: "cloud", projectUrl: "https://dev.azure.com/org/Proj", scopeType: "area", scopePath: "Proj\\Team A" });
+    expect(warnings).toEqual(makeBacklog().warnings);
     const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(url).toBe("/api/ado/backlog");
     expect(JSON.parse(String(init.body))).toEqual({
@@ -207,7 +211,7 @@ describe("AdoConnectModal", () => {
   it("switches to the Iteration tree, clearing the selection", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch();
-    const { onBacklog } = renderModal();
+    const { onCreated } = renderModal();
     await fillAndConnect(user);
     await user.click(within(await screen.findByRole("tree")).getByRole("treeitem", { name: /^Team A/ }));
     await user.click(screen.getByRole("radio", { name: "Iteration path" }));
@@ -215,7 +219,7 @@ describe("AdoConnectModal", () => {
     const tree = screen.getByRole("tree", { name: "Iteration path" });
     await user.click(within(tree).getByRole("treeitem", { name: /^Phase 1/ }));
     await user.click(submitButton());
-    await vi.waitFor(() => expect(onBacklog).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
     expect(JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body))).toMatchObject({
       scopeType: "iteration",
       scopePath: "Proj\\Phase 1",
@@ -226,7 +230,7 @@ describe("AdoConnectModal", () => {
     const user = userEvent.setup();
     let release: (r: Response) => void = () => undefined;
     mockFetch({ backlog: () => new Promise<Response>((resolve) => (release = resolve)) });
-    const { onBacklog } = renderModal();
+    const { onCreated } = renderModal();
     await fillAndConnect(user);
     await user.click(within(await screen.findByRole("tree")).getByRole("treeitem", { name: /^Proj/ }));
     await user.click(submitButton());
@@ -235,14 +239,14 @@ describe("AdoConnectModal", () => {
     release(json({ errors: ["Unknown Area path: Proj."] }, 422));
     expect(await screen.findByRole("alert")).toHaveTextContent("Unknown Area path: Proj.");
     expect(submitButton()).toBeEnabled();
-    expect(onBacklog).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
   });
 
   it("locks the path picker while work items load, so the request and the UI can't disagree", async () => {
     const user = userEvent.setup();
     let release: (r: Response) => void = () => undefined;
     const fetchMock = mockFetch({ backlog: () => new Promise<Response>((resolve) => (release = resolve)) });
-    const { onBacklog } = renderModal();
+    const { onCreated } = renderModal();
     await fillAndConnect(user);
     const tree = await screen.findByRole("tree", { name: "Area path" });
     await user.click(within(tree).getByRole("treeitem", { name: /^Team A/ }));
@@ -256,9 +260,9 @@ describe("AdoConnectModal", () => {
     await user.keyboard("{Enter}");
     expect(screen.getByTestId("ado-selected-path")).toHaveTextContent("Proj\\Team A");
     release(json(makeBacklog()));
-    await vi.waitFor(() => expect(onBacklog).toHaveBeenCalledTimes(1));
-    expect(onBacklog.mock.calls[0][1]).toMatchObject({ scopeType: "area", scopePath: "Proj\\Team A" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect((onCreated.mock.calls[0] as [number, ReleasePlan, string[]])[1].source).toMatchObject({ scopeType: "area", scopePath: "Proj\\Team A" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("re-enables the path picker after a failed load", async () => {
@@ -363,11 +367,11 @@ describe("AdoConnectModal", () => {
     const user = userEvent.setup();
     const signals: AbortSignal[] = [];
     mockFetch({ connect: hanging(signals) });
-    const { onBacklog, rerender, onClose } = renderModal();
+    const { onCreated, rerender, onClose } = renderModal();
     await fillAndConnect(user);
     expect(signals).toHaveLength(1);
     expect(signals[0].aborted).toBe(false);
-    rerender(<AdoConnectModal open={false} onClose={onClose} onBacklog={onBacklog} />);
+    rerender(<AdoConnectModal open={false} onClose={onClose} onCreated={onCreated} />);
     expect(signals[0].aborted).toBe(true);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -375,13 +379,103 @@ describe("AdoConnectModal", () => {
   it("starts fresh (no PAT, no tree) when reopened", async () => {
     const user = userEvent.setup();
     mockFetch();
-    const { onBacklog, rerender, onClose } = renderModal();
+    const { onCreated, rerender, onClose } = renderModal();
     await fillAndConnect(user);
     await screen.findByRole("tree");
-    rerender(<AdoConnectModal open={false} onClose={onClose} onBacklog={onBacklog} />);
-    rerender(<AdoConnectModal open onClose={onClose} onBacklog={onBacklog} />);
+    rerender(<AdoConnectModal open={false} onClose={onClose} onCreated={onCreated} />);
+    rerender(<AdoConnectModal open onClose={onClose} onCreated={onCreated} />);
     expect(patInput()).toHaveValue("");
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
     expect(urlInput()).toHaveValue("https://dev.azure.com/org/Proj");
+  });
+
+  describe("plan name", () => {
+    async function connectAndPick(user: ReturnType<typeof userEvent.setup>) {
+      await fillAndConnect(user);
+      await user.click(within(await screen.findByRole("tree", { name: "Area path" })).getByRole("treeitem", { name: /^Team A/ }));
+    }
+
+    it("is not shown before Connect", () => {
+      renderModal();
+      expect(screen.queryByLabelText("Plan name")).not.toBeInTheDocument();
+    });
+
+    it("is pre-filled with the default name after Connect and stays editable", async () => {
+      const user = userEvent.setup();
+      mockFetch();
+      renderModal();
+      await connectAndPick(user);
+      expect(nameInput()).toHaveValue("Proj – Feature Release Plan");
+      expect(nameInput()).toBeRequired();
+      await user.clear(nameInput());
+      await user.type(nameInput(), "My plan");
+      expect(nameInput()).toHaveValue("My plan");
+    });
+
+    it("rejects a blank name inline without fetching the backlog", async () => {
+      const user = userEvent.setup();
+      const fetchMock = mockFetch();
+      const { onCreated } = renderModal();
+      await connectAndPick(user);
+      await user.clear(nameInput());
+      await user.type(nameInput(), "   ");
+      await user.click(submitButton());
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("Plan name is required.");
+      expect(nameInput()).toHaveAttribute("aria-invalid", "true");
+      expect(nameInput()).toHaveAccessibleDescription("Plan name is required.");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(onCreated).not.toHaveBeenCalled();
+    });
+
+    it("rejects a name longer than 200 characters but accepts exactly 200", async () => {
+      const user = userEvent.setup();
+      const fetchMock = mockFetch();
+      const { onCreated } = renderModal();
+      await connectAndPick(user);
+      await user.clear(nameInput());
+      await user.click(nameInput());
+      await user.paste("a".repeat(201));
+      await user.click(submitButton());
+      expect(screen.getByRole("alert")).toHaveTextContent("Plan name must be at most 200 characters.");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await user.clear(nameInput());
+      await user.paste("a".repeat(200));
+      await user.click(submitButton());
+      await vi.waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    });
+
+    it("POSTs the trimmed name, project and state, then calls onCreated with the named plan", async () => {
+      const user = userEvent.setup();
+      const fetchMock = mockFetch();
+      const { onCreated } = renderModal();
+      await connectAndPick(user);
+      await user.clear(nameInput());
+      await user.type(nameInput(), "  Q4 plan  ");
+      await user.click(submitButton());
+      await vi.waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+      const [url, init] = fetchMock.mock.calls[2] as [string, RequestInit];
+      expect(url).toBe("/api/plan");
+      expect(init.method).toBe("POST");
+      const body = JSON.parse(String(init.body)) as { name: string; projectType: string; projectName: string; state: ReleasePlan };
+      expect(body).toMatchObject({ name: "Q4 plan", projectType: "cloud", projectName: "Proj" });
+      expect(body.state.name).toBe("Q4 plan");
+      expect(JSON.stringify(body)).not.toContain(PAT);
+      const [id, plan] = onCreated.mock.calls[0] as [number, ReleasePlan];
+      expect(id).toBe(7);
+      expect(plan.name).toBe("Q4 plan");
+    });
+
+    it("shows a POST error inline and keeps the modal open", async () => {
+      const user = userEvent.setup();
+      mockFetch({ plan: () => json({ errors: ["The release plan database is unavailable."] }, 503) });
+      const { onCreated } = renderModal();
+      await connectAndPick(user);
+      await user.click(submitButton());
+      expect(await screen.findByRole("alert")).toHaveTextContent("The release plan database is unavailable.");
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(submitButton()).toBeEnabled();
+      expect(onCreated).not.toHaveBeenCalled();
+    });
   });
 });

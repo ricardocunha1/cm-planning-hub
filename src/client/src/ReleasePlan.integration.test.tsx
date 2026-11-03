@@ -80,22 +80,12 @@ const RAW_PLAN = {
   ],
 };
 
-const planFile = (body: unknown, name = "integration-plan.json") =>
-  new File([typeof body === "string" ? body : JSON.stringify(body)], name, { type: "application/json" });
-
 function summaryBox(name: string) {
   return within(screen.getByRole("region", { name: "Milestone summary" })).getByRole("group", { name });
 }
 
 function savedPlan(): { name: string; milestones: Array<{ id: string; color: string }>; epics: Array<{ features: Array<{ id: number; milestoneId: string | null; size: string }> }> } {
   return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
-}
-
-async function importFromHome(user: ReturnType<typeof userEvent.setup>, file: File) {
-  await user.click(screen.getByRole("button", { name: /Import a JSON file/ }));
-  const dialog = screen.getByRole("dialog", { name: "Import a JSON file" });
-  await user.upload(within(dialog).getByLabelText("Release plan file"), file);
-  await user.click(within(dialog).getByRole("button", { name: "Create board" }));
 }
 
 describe("Release Plan – full app flow (Phase 1)", () => {
@@ -109,23 +99,16 @@ describe("Release Plan – full app flow (Phase 1)", () => {
   });
 
   it(
-    "home → /release-plan → import JSON → board summary → Table milestone change → reload restores the plan",
+    "saved plan → board summary → Table milestone change → reload restores the plan",
     async () => {
       const user = userEvent.setup();
-      const first = renderApp("/");
-
-      // Home → Release Plan card.
-      await user.click(screen.getByRole("link", { name: "Open Release Plan" }));
-      expect(location()).toBe("/release-plan");
-      expect(screen.queryByRole("link", { name: "Continue last board" })).not.toBeInTheDocument();
-
-      // Import the synthetic file → board.
-      await importFromHome(user, planFile(RAW_PLAN));
+      // Seed the autosave with the synthetic plan (raw, un-normalized) and open the board.
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(RAW_PLAN));
+      const first = renderApp("/release-plan/board");
       expect(await screen.findByRole("region", { name: "Milestone summary" }, FIND)).toBeInTheDocument();
       expect(location()).toBe("/release-plan/board");
       expect(document.title).toBe("Planning Hub – Release Plan – Board");
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-      expect(screen.getByText("Plan loaded: Integration Plan")).toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "Plan name" })).toHaveValue("Integration Plan");
       expect(screen.getByTestId("source-info")).toHaveTextContent("Azure DevOps · Area Path: Synthetic\\Team");
 
@@ -184,52 +167,6 @@ describe("Release Plan – full app flow (Phase 1)", () => {
       // And the Table still shows the moved Feature in Beta.
       await user.click(screen.getByRole("tab", { name: "Table" }));
       expect(screen.getByRole("combobox", { name: "Milestone for Charts" })).toHaveValue("ms_beta");
-    },
-    FLOW_TIMEOUT_MS,
-  );
-
-  it(
-    "after a reload on /release-plan offers 'Continue last board'; replacing asks first and one Esc only closes the confirmation",
-    async () => {
-      const user = userEvent.setup();
-      const first = renderApp("/release-plan");
-      await importFromHome(user, planFile(RAW_PLAN));
-      expect(await screen.findByRole("region", { name: "Milestone summary" }, FIND)).toBeInTheDocument();
-
-      first.unmount();
-      renderApp("/release-plan");
-      const last = screen.getByRole("region", { name: "Last board" });
-      expect(last).toHaveTextContent("Integration Plan");
-      expect(last).toHaveTextContent("Azure DevOps · Area Path: Synthetic\\Team");
-
-      // An invalid file keeps the modal open with the inline error; nothing is replaced.
-      await importFromHome(user, planFile({ schema: "release-planner", milestones: [], epics: [] }));
-      const importDialog = screen.getByRole("dialog", { name: "Import a JSON file" });
-      expect(await within(importDialog).findByRole("alert", undefined, FIND)).toHaveTextContent(
-        "This is a User Story plan. Open it in the User Story board.",
-      );
-      expect(savedPlan().name).toBe("Integration Plan");
-
-      // A valid file asks "Replace the current board?" on top of the import modal.
-      await user.upload(within(importDialog).getByLabelText("Release plan file"), planFile({ ...RAW_PLAN, name: "Second Plan" }));
-      await user.click(within(importDialog).getByRole("button", { name: "Create board" }));
-      expect(await screen.findByRole("dialog", { name: "Replace the current board?" }, FIND)).toBeInTheDocument();
-
-      // One Esc closes only the topmost (confirmation) dialog.
-      await user.keyboard("{Escape}");
-      expect(screen.queryByRole("dialog", { name: "Replace the current board?" })).not.toBeInTheDocument();
-      expect(screen.getByRole("dialog", { name: "Import a JSON file" })).toBeInTheDocument();
-      expect(savedPlan().name).toBe("Integration Plan");
-      expect(location()).toBe("/release-plan");
-
-      // Confirming replaces the board and opens it; no "restored" toast for an import.
-      await user.click(screen.getByRole("button", { name: "Create board" }));
-      await user.click(await screen.findByRole("button", { name: "Replace" }, FIND));
-      expect(await screen.findByText("Plan loaded: Second Plan", undefined, FIND)).toBeInTheDocument();
-      expect(location()).toBe("/release-plan/board");
-      expect(screen.getByRole("textbox", { name: "Plan name" })).toHaveValue("Second Plan");
-      expect(screen.queryByText("Restored your last session")).not.toBeInTheDocument();
-      expect(savedPlan().name).toBe("Second Plan");
     },
     FLOW_TIMEOUT_MS,
   );

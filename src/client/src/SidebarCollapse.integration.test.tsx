@@ -156,7 +156,7 @@ describe("Sidebar collapse – full app", () => {
       expect(location()).toBe("/release-plan/board");
       expectCollapsed();
       expectActive("Release Plan", "Monte Carlo");
-      expect(screen.getByRole("button", { name: "Save Plan" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Sync from ADO" })).toBeInTheDocument();
       expect(screen.getByRole("region", { name: "Milestone summary" })).toBeInTheDocument();
 
       // Toggling the sidebar on the board does not remount/lose the board view state.

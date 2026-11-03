@@ -226,8 +226,9 @@ describe("Planning Hub – full app flow", () => {
     expect(screen.getByRole("link", { name: "Monte Carlo" })).not.toHaveAttribute("aria-current");
   });
 
-  it("goes home → Release Plan card → /release-plan → opens the JSON import modal", async () => {
+  it("goes home → Release Plan card → /release-plan → opens the Azure DevOps modal", async () => {
     const user = userEvent.setup();
+    fetchMock.mockResolvedValue(jsonResponse({ items: [], total: 0, page: 1, pageSize: 10 }));
     renderApp("/");
 
     // Home: both tool cards, Release Plan not active yet.
@@ -253,33 +254,19 @@ describe("Planning Hub – full app flow", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(location()).toBe("/release-plan");
 
-    // The JSON card opens the import modal shell.
-    const jsonCard = screen.getByRole("button", { name: /Import a JSON file/ });
-    await user.click(jsonCard);
-    const dialog = screen.getByRole("dialog", { name: "Import a JSON file" });
-    expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(within(dialog).getByLabelText("Release plan file")).toHaveAttribute("accept", ".json,application/json");
-
-    // Phase 0: "Create board" without a file shows the inline error and stays open.
-    await user.click(within(dialog).getByRole("button", { name: "Create board" }));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(/^Select a \.json file\.$/);
-    expect(screen.getByRole("dialog", { name: "Import a JSON file" })).toBeInTheDocument();
-    expect(location()).toBe("/release-plan");
-
-    // Esc closes it and focus returns to the JSON card.
+    // Esc closes the modal and focus returns to the card; reopening starts clean.
+    await user.click(adoCard);
+    expect(screen.getByRole("dialog", { name: "Create from Azure DevOps" })).toHaveAttribute("aria-modal", "true");
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(jsonCard).toHaveFocus();
-
-    // Re-opening starts clean (no stale error), and Cancel closes it.
-    await user.click(jsonCard);
+    expect(adoCard).toHaveFocus();
+    await user.click(adoCard);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByText("No file selected.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    // Client-only in Phase 0: no API traffic.
-    expect(fetchMock).not.toHaveBeenCalled();
+    // Only the saved-plans list is requested; no ADO traffic without a Connect.
+    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith("/api/plan"))).toBe(true);
   }, FLOW_TIMEOUT_MS);
 
   it("switches between the tools from the sidebar", async () => {

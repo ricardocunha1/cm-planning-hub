@@ -44,6 +44,10 @@ const PAT = "qa-default-source-pat-42";
 const CLOUD_URL = "https://dev.azure.com/org/Proj";
 const ONPREM_SAVED = { source: "onprem", projectUrl: "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/Other" };
 
+/** `POST /api/plan` answer for the create flow (the new plan gets id 42). */
+const createdPlan = () =>
+  json({ id: 42, name: "Proj", projectType: "cloud", projectName: "Proj", createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z", state: {} }, 201);
+
 function mockFetch(routes: Record<string, () => Response>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init: RequestInit = {}) => {
     const handler = routes[String(input)];
@@ -157,6 +161,7 @@ describe("ADO connection modal – Collaboration Hub by default (full app)", { t
     const fetchMock = mockFetch({
       "/api/ado/connect": () => json(makeConnectResponse()),
       "/api/ado/backlog": () => json(makeBacklog()),
+      "/api/plan": createdPlan,
     });
     const user = userEvent.setup();
     renderApp("/release-plan");
@@ -170,7 +175,7 @@ describe("ADO connection modal – Collaboration Hub by default (full app)", { t
     const tree = await within(dialog).findByRole("tree", { name: "Area path" }, FIND);
     await user.click(within(tree).getByRole("treeitem", { name: /^Team A/ }));
     await user.click(within(dialog).getByRole("button", { name: "Create board" }));
-    await waitFor(() => expect(location()).toBe("/release-plan/board"), FIND);
+    await waitFor(() => expect(location()).toBe("/release-plan/42"), FIND);
 
     expect(bodiesTo(fetchMock, "/api/ado/connect")[0]).toMatchObject({ source: "cloud" });
     expect(bodiesTo(fetchMock, "/api/ado/backlog")[0]).toMatchObject({ source: "cloud", scopeType: "area" });
@@ -243,6 +248,7 @@ describe("ADO connection modal – Collaboration Hub by default (full app)", { t
     const fetchMock = mockFetch({
       "/api/ado/connect": () => json(makeConnectResponse()),
       "/api/ado/backlog": () => json(makeBacklog()),
+      "/api/plan": createdPlan,
     });
     const user = userEvent.setup();
     renderApp("/release-plan");
@@ -253,7 +259,7 @@ describe("ADO connection modal – Collaboration Hub by default (full app)", { t
     const tree = await within(create).findByRole("tree", { name: "Area path" }, FIND);
     await user.click(within(tree).getByRole("treeitem", { name: /^Team A/ }));
     await user.click(within(create).getByRole("button", { name: "Create board" }));
-    await waitFor(() => expect(location()).toBe("/release-plan/board"), FIND);
+    await waitFor(() => expect(location()).toBe("/release-plan/42"), FIND);
     expect(fetchMock).toHaveBeenCalled();
 
     // Another session remembers On-Prem for Release Plan; the plan's own connection must still win.

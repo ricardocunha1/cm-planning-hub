@@ -57,6 +57,11 @@ function toFeature(item: AdoWorkItem, milestoneId: string): Feature {
   };
 }
 
+/** Default name of a board built from `projectName`'s backlog. */
+export function defaultPlanName(projectName: string): string {
+  return `${projectName} – Feature Release Plan`;
+}
+
 /**
  * A new board from a fetched backlog (the template default): Releases mode, one
  * `MVP` milestone (`MS_COLORS[0]`, no date) holding every Feature, no flags,
@@ -88,7 +93,7 @@ export function planFromBacklog(backlog: AdoBacklog, connection: AdoConnection, 
     schema: SCHEMA,
     version: VERSION,
     mode: "releases",
-    name: `${backlog.project.name} – Feature Release Plan`,
+    name: defaultPlanName(backlog.project.name),
     source: {
       system: ADO_SYSTEM,
       project: backlog.project.name,

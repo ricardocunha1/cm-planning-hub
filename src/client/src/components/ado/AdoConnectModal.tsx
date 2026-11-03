@@ -10,6 +10,16 @@ import { PathTree } from "./PathTree";
 /** The path trees a modal offers: one (no toggle) or both (an "Area path" / "Iteration path" toggle). */
 export type AdoScopeTypes = readonly [AdoScopeType, ...AdoScopeType[]];
 
+/** An optional required text field (e.g. the name of the plan to create) shown after Connect, above the submit button. */
+export interface AdoNameField {
+  /** Field label, e.g. "Plan name". */
+  label: string;
+  /** Initial value, derived from the connected project's name; the user can edit it. */
+  defaultName: (projectName: string) => string;
+  /** Returns the inline error for `name` (already trimmed), or `null` when it is valid. */
+  validate: (name: string) => string | null;
+}
+
 export interface AdoConnectModalProps<T> {
   /** Whether the modal is shown; it starts fresh every time it opens. */
   open: boolean;
@@ -23,8 +33,10 @@ export interface AdoConnectModalProps<T> {
   connectionKey: string;
   /** Cancel, Esc or a backdrop click; an in-flight request is aborted. */
   onClose: () => void;
-  /** Fetches the tool's data for the picked path; a rejection is shown inline and the modal stays open. */
-  load: (request: AdoScopedRequest, signal: AbortSignal) => Promise<T>;
+  /** Extra required name field (see {@link AdoNameField}); `load` then receives its trimmed value. */
+  nameField?: AdoNameField;
+  /** Fetches the tool's data for the picked path (`name` is `""` without a `nameField`); a rejection is shown inline and the modal stays open. */
+  load: (request: AdoScopedRequest, signal: AbortSignal, name: string) => Promise<T>;
   /** The loaded data and the connection it came from (canonical URL, no PAT); the caller closes the modal. */
   onLoaded: (result: T, connection: AdoConnection) => void;
 }
@@ -43,7 +55,7 @@ const primaryButton =
   "rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900";
 
 /** A connection field that can be invalid before any request. */
-type ConnectionField = "source" | "url" | "pat";
+type ConnectionField = "source" | "url" | "pat" | "name";
 
 /** Inline errors plus the fields they are about (linked with `aria-invalid` / `aria-describedby`). */
 interface FormErrors {
@@ -89,7 +101,8 @@ function connectionErrors(source: AdoSource | null, projectUrl: string, pat: str
  * "Area path" / "Iteration path" toggle when there are two); the submit button
  * calls `load` and hands its result to `onLoaded`. Editing the source, URL or
  * PAT after Connect clears the trees (Connect again); the path picker is
- * disabled while a request runs. Errors show inline (invalid fields point at
+ * disabled while a request runs. With a `nameField`, a required name input
+ * (pre-filled from the project name after Connect) is validated before `load`. Errors show inline (invalid fields point at
  * them with `aria-invalid` / `aria-describedby`) and the modal stays open. The
  * PAT lives only in this component's state; its input opts out of password
  * managers.
@@ -103,6 +116,7 @@ function AdoConnectDialog<T>({
   submitLabel,
   scopeTypes,
   connectionKey,
+  nameField,
   onClose,
   load,
   onLoaded,
@@ -112,6 +126,7 @@ function AdoConnectDialog<T>({
   const patId = useId();
   const patHelpId = useId();
   const errorId = useId();
+  const nameId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -123,6 +138,7 @@ function AdoConnectDialog<T>({
   const [connected, setConnected] = useState<{ source: AdoSource; response: AdoConnectResponse } | null>(null);
   const [scopeType, setScopeType] = useState<AdoScopeType>(scopeTypes[0]);
   const [scopePath, setScopePath] = useState<string | null>(null);
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState<"connect" | "load" | null>(null);
   const [errors, setErrors] = useState<FormErrors>(NO_ERRORS);
 
@@ -168,6 +184,7 @@ function AdoConnectDialog<T>({
       }
       saveAdoConnection(connectionKey, { source, projectUrl: response.projectUrl });
       setConnected({ source, response });
+      setName(nameField ? nameField.defaultName(response.project.name) : "");
       setScopePath(null);
       setBusy(null);
     } catch (exc) {
@@ -182,6 +199,12 @@ function AdoConnectDialog<T>({
     if (!connected || scopePath === null || busy) {
       return;
     }
+    const trimmedName = name.trim();
+    const nameError = nameField ? nameField.validate(trimmedName) : null;
+    if (nameError) {
+      setErrors({ messages: [nameError], fields: new Set(["name"]) });
+      return;
+    }
     const connection: AdoConnection = {
       source: connected.source,
       projectUrl: connected.response.projectUrl,
@@ -192,7 +215,7 @@ function AdoConnectDialog<T>({
     setErrors(NO_ERRORS);
     setBusy("load");
     try {
-      const result = await load({ ...connection, pat }, controller.signal);
+      const result = await load({ ...connection, pat }, controller.signal, trimmedName);
       if (controller.signal.aborted) {
         return;
       }
@@ -348,6 +371,23 @@ function AdoConnectDialog<T>({
                   `Select an ${scopeType === "area" ? "Area" : "Iteration"} path (child paths are included).`
                 )}
               </p>
+              {nameField && (
+                <div className="space-y-1">
+                  <label htmlFor={nameId} className="block font-medium text-slate-200">
+                    {nameField.label}
+                  </label>
+                  <input
+                    id={nameId}
+                    type="text"
+                    required
+                    value={name}
+                    disabled={busy !== null}
+                    onChange={(event) => setName(event.target.value)}
+                    {...invalidProps("name")}
+                    className={inputClass}
+                  />
+                </div>
+              )}
             </section>
           )}
           {hasErrors && (

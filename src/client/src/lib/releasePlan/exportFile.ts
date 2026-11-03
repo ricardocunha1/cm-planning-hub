@@ -1,25 +1,14 @@
-import type { ReleasePlan } from "./types";
-
 /** Delay before the object URL of a download is revoked and its anchor removed. */
 export const DOWNLOAD_REVOKE_MS = 500;
 
 /**
- * Base file name (no extension) for a saved/exported plan: the plan name (or
+ * Base file name (no extension) for an exported plan: the plan name (or
  * "feature-plan" when empty) with every run of characters other than word
  * characters and "-" replaced by "_", then "_" and the UTC date of `now`
  * (`YYYY-MM-DD`).
  */
 export function fileBase(name: string, now: Date): string {
   return (name || "feature-plan").replace(/[^\w\-]+/g, "_") + "_" + now.toISOString().slice(0, 10);
-}
-
-/**
- * Content of a saved plan file: the plan with `schema`, `version` and a fresh
- * `savedAt = now.toISOString()`, pretty-printed with a 2-space indent. `plan`
- * itself is not mutated.
- */
-export function planToJson(plan: ReleasePlan, now: Date): string {
-  return JSON.stringify({ ...plan, schema: "release-planner-features", version: 1, savedAt: now.toISOString() }, null, 2);
 }
 
 /**

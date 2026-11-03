@@ -10,7 +10,7 @@ const svgProps = {
   focusable: false,
 } as const;
 
-/** Document-with-braces icon for the "Import a JSON file" card. */
+/** Document-with-braces icon (JSON file). */
 export function FileJsonIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg className={className} {...svgProps}>

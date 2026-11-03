@@ -103,4 +103,19 @@ describe("ReleasePlanProvider", () => {
     act(() => current().replacePlan(samplePlan()));
     expect(screen.getByTestId("name")).toHaveTextContent("Sample Release Plan");
   });
+
+  it("loadPlan sets the plan and its server id; replacePlan clears the id", () => {
+    render(
+      <ReleasePlanProvider initialPlan={null} storage={null}>
+        <Probe />
+      </ReleasePlanProvider>,
+    );
+    expect(current().planId).toBeNull();
+    act(() => current().loadPlan(12, samplePlan({ name: "Saved" })));
+    expect(screen.getByTestId("name")).toHaveTextContent("Saved");
+    expect(current().planId).toBe(12);
+    act(() => current().replacePlan(samplePlan({ name: "Other" })));
+    expect(screen.getByTestId("name")).toHaveTextContent("Other");
+    expect(current().planId).toBeNull();
+  });
 });

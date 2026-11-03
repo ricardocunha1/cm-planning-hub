@@ -8,7 +8,11 @@ interface ReleasePlanState {
   plan: ReleasePlan | null;
   /** Applies a `PlanAction`; every change is autosaved. */
   dispatch: Dispatch<PlanAction>;
-  /** Replaces the whole plan (import); clears the pending "restored" notice. */
+  /** Server id of the saved plan being edited, `null` when the plan is not (yet) tied to a saved plan. */
+  planId: number | null;
+  /** Makes `plan` the current board, saved on the server as `id`. */
+  loadPlan: (id: number, plan: ReleasePlan) => void;
+  /** Replaces the whole plan (not tied to a saved plan: `planId` becomes `null`); clears the pending "restored" notice. */
   replacePlan: (plan: ReleasePlan) => void;
   /** Whether the plan was hydrated from storage on mount. */
   restoredFromStorage: boolean;
@@ -41,6 +45,7 @@ export function ReleasePlanProvider({
     return { plan: saved, restored: saved !== null };
   });
   const [plan, dispatch] = useReducer(planReducer, init.plan);
+  const [planId, setPlanId] = useState<number | null>(null);
   const restoredNotice = useRef(init.restored);
 
   useEffect(() => {
@@ -51,6 +56,13 @@ export function ReleasePlanProvider({
 
   const replacePlan = useCallback((next: ReleasePlan) => {
     restoredNotice.current = false;
+    setPlanId(null);
+    dispatch({ type: "replace", plan: next });
+  }, []);
+
+  const loadPlan = useCallback((id: number, next: ReleasePlan) => {
+    restoredNotice.current = false;
+    setPlanId(id);
     dispatch({ type: "replace", plan: next });
   }, []);
 
@@ -61,8 +73,8 @@ export function ReleasePlanProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ plan, dispatch, replacePlan, restoredFromStorage: init.restored, consumeRestoredNotice }),
-    [plan, replacePlan, init.restored, consumeRestoredNotice],
+    () => ({ plan, dispatch, planId, loadPlan, replacePlan, restoredFromStorage: init.restored, consumeRestoredNotice }),
+    [plan, planId, loadPlan, replacePlan, init.restored, consumeRestoredNotice],
   );
   return <ReleasePlanContext.Provider value={value}>{children}</ReleasePlanContext.Provider>;
 }

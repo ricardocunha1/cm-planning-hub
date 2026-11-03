@@ -12,7 +12,12 @@ import type { ReleasePlan } from "../lib/releasePlan/types";
 import { normalizePlan } from "../lib/releasePlan/validate";
 import { ForecastProvider } from "../monteCarloStore";
 import { makeBacklog, makeConnectResponse } from "../test/adoFixtures";
-import { samplePlan } from "../test/releasePlanFixtures";
+
+// The home page's saved-plans list is not under test here (and must not count as a request).
+vi.mock("../lib/releasePlan/planApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/releasePlan/planApi")>()),
+  listPlans: vi.fn(async () => ({ items: [], total: 0, page: 1, pageSize: 10 })),
+}));
 
 const PAT = "qa-secret-pat-0123456789";
 const CANONICAL = "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/My%20Proj";
@@ -67,6 +72,10 @@ function mockNetwork(
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     signals.push(init?.signal ?? undefined);
+    if (url === "/api/plan") {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return json({ id: 42, ...body, createdAt: "2026-11-03T10:00:00Z", updatedAt: "2026-11-03T10:00:00Z" }, 201);
+    }
     const route = url === "/api/ado/connect" ? "connect" : url === "/api/ado/backlog" ? "backlog" : "other";
     if (route === "other") {
       return json({ errors: [`unexpected ${url}`] }, 500);
@@ -173,7 +182,7 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     await user.click(within(adoDialog()).getByRole("button", { name: "Create board" }));
 
     // Board opens with the fetched Epics (synthetic Epic last) and every Feature in MVP.
-    await waitFor(() => expect(location()).toBe("/release-plan/board"), FIND);
+    await waitFor(() => expect(location()).toBe("/release-plan/42"), FIND);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Plan name")).toHaveValue("My Proj – Feature Release Plan");
     const board = screen.getByRole("region", { name: "Board" });
@@ -182,15 +191,15 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect([...board.querySelectorAll(".fcard")].map((c) => c.getAttribute("data-feature"))).toEqual(["102", "104", "105", "106", "107"]);
     expect(screen.getByTestId("source-info")).toHaveTextContent("Azure DevOps · Iteration Path: Proj\\Phase 1\\Sprint 02 · fetched");
 
-    // Toasts: Plan loaded + each warning; no "Restored your last session".
+    // Toasts: Plan created + each warning; no "Restored your last session".
     const toasts = toastTexts();
-    expect(toasts.some((t) => t.includes("Plan loaded: My Proj – Feature Release Plan"))).toBe(true);
+    expect(toasts.some((t) => t.includes("Plan created: My Proj – Feature Release Plan"))).toBe(true);
     expect(toasts.some((t) => t.includes(warning))).toBe(true);
     expect(toasts.some((t) => t.includes("Only the first 20000 work items were loaded"))).toBe(true);
     expect(toasts.some((t) => t.includes("Restored your last session"))).toBe(false);
 
-    // Requests: PAT only in the JSON bodies, typed URL sent to connect, canonical URL to backlog.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Requests: PAT only in the JSON bodies, typed URL sent to connect, canonical URL to backlog, then the plan is saved.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
     for (const [url, init] of calls) {
       expect(url).not.toContain(PAT);
@@ -205,6 +214,8 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
       scopeType: "iteration",
       scopePath: "Proj\\Phase 1\\Sprint 02",
     });
+    expect(calls[2][0]).toBe("/api/plan");
+    expect(JSON.parse(String(calls[2][1].body))).toMatchObject({ name: "My Proj – Feature Release Plan", projectType: "onprem", projectName: "My Proj" });
 
     // Persistence: the plan (with the connection in source) and the connection; the PAT nowhere.
     const saved = storedPlan();
@@ -241,38 +252,6 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect(within(adoDialog()).getByLabelText("Project URL")).toHaveValue(CANONICAL);
     expect(within(adoDialog()).getByLabelText("Personal Access Token")).toHaveValue("");
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
-  });
-
-  it("asks before replacing a stored board; Cancel keeps the old board, Replace swaps it and autosaves", async () => {
-    const user = userEvent.setup();
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(samplePlan()));
-    mockNetwork();
-    renderApp("/release-plan");
-    expect(screen.getByRole("link", { name: /Continue last board/ })).toBeInTheDocument();
-
-    await openAdoFromHome(user);
-    await fillConnection(user);
-    await connect(user);
-    await pickSprint02(user);
-    await user.click(within(adoDialog()).getByRole("button", { name: "Create board" }));
-    const confirm = await screen.findByRole("dialog", { name: "Replace the current board?" }, FIND);
-    expect(confirm).toHaveTextContent('"Sample Release Plan" will be replaced by "My Proj – Feature Release Plan"');
-
-    // Esc closes only the confirmation (topmost dialog); the ADO modal and the stored plan stay.
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "Replace the current board?" })).not.toBeInTheDocument();
-    expect(adoDialog()).toBeInTheDocument();
-    expect(storedPlan()!.name).toBe("Sample Release Plan");
-    expect(location()).toBe("/release-plan");
-
-    await user.click(within(adoDialog()).getByRole("button", { name: "Create board" }));
-    await user.click(within(await screen.findByRole("dialog", { name: "Replace the current board?" }, FIND)).getByRole("button", { name: "Replace" }));
-    await waitFor(() => expect(location()).toBe("/release-plan/board"), FIND);
-    expect(screen.getByLabelText("Plan name")).toHaveValue("My Proj – Feature Release Plan");
-    expect(storedPlan()!.name).toBe("My Proj – Feature Release Plan");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(toastTexts().some((t) => t.includes("Plan loaded: My Proj – Feature Release Plan"))).toBe(true);
-    expect(allLocalStorage()).not.toContain(PAT);
   });
 
   it("ignores a Connect response that arrives after the URL was edited (no tree, nothing remembered)", async () => {
@@ -329,7 +308,7 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     await act(async () => held[0].resolve(json(makeBacklog())));
     expect(location()).toBe("/release-plan");
     expect(storedPlan()).toBeNull();
-    expect(toastTexts().some((t) => t.includes("Plan loaded"))).toBe(false);
+    expect(toastTexts().some((t) => t.includes("Plan created"))).toBe(false);
     expect(card).toHaveFocus();
 
     // Reopening starts fresh: URL pre-filled from the remembered connection, PAT forgotten, no tree.

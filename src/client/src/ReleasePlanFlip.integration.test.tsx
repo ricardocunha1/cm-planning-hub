@@ -81,7 +81,6 @@ const PLAN = {
   ],
 };
 
-const planFile = (plan: object = PLAN, name = "flip-plan.json") => new File([JSON.stringify(plan)], name, { type: "application/json" });
 
 const board = () => screen.getByRole("region", { name: "Board" });
 const flipButton = () => screen.getByRole("button", { name: "Flip board" });
@@ -101,12 +100,10 @@ function savedPlan(): Saved {
   return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
 }
 
-async function importPlan(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /Import a JSON file/ }));
-  const dialog = screen.getByRole("dialog", { name: "Import a JSON file" });
-  await user.upload(within(dialog).getByLabelText("Release plan file"), planFile());
-  await user.click(within(dialog).getByRole("button", { name: "Create board" }));
-  expect(await screen.findByRole("region", { name: "Milestone summary" }, FIND)).toBeInTheDocument();
+/** Seeds the autosave with PLAN and opens the board (a saved plan is no longer imported from a JSON file). */
+function openBoard(): ReturnType<typeof renderApp> {
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(PLAN));
+  return renderApp("/release-plan/board");
 }
 
 /** Drags a Feature card and drops it on `target` at (`clientX`, `clientY`). */
@@ -148,8 +145,8 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
     "import → standard by default → flip → drag a Feature across milestone columns → autosaved; Table → Board keeps flipped; reload is standard again",
     async () => {
       const user = userEvent.setup();
-      const first = renderApp("/release-plan");
-      await importPlan(user);
+      const first = openBoard();
+      await screen.findByRole("region", { name: "Milestone summary" }, FIND);
       expect(screen.getByTestId("location")).toHaveTextContent("/release-plan/board");
       expect(flipButton()).toHaveAttribute("aria-pressed", "false");
       expect(isFlipped()).toBe(false);
@@ -210,8 +207,8 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
     "flipped: same-epic reorder and epic reorder use clientY; after flipping back the standard board uses clientX again",
     async () => {
       const user = userEvent.setup();
-      renderApp("/release-plan");
-      await importPlan(user);
+      openBoard();
+      await screen.findByRole("region", { name: "Milestone summary" }, FIND);
       await user.click(flipButton());
 
       // "Export" dropped in the upper half of the "Search" row, Beta column → before Search, moved to Beta.
@@ -252,29 +249,6 @@ describe("Release Plan – Flip board full app flow (QA)", () => {
         [1001, "ms_alpha"],
         [1002, "ms_alpha"],
       ]);
-    },
-    FLOW_TIMEOUT_MS,
-  );
-
-  it(
-    "keeps the orientation across Load Plan (board remount) and renders the loaded plan flipped",
-    async () => {
-      const user = userEvent.setup();
-      renderApp("/release-plan");
-      await importPlan(user);
-      await user.click(flipButton());
-      await user.click(screen.getByRole("button", { name: "Load Plan" }));
-      const dialog = screen.getByRole("dialog", { name: "Load a plan" });
-      const next = { ...PLAN, name: "Loaded Flip Plan", epics: [PLAN.epics[1]] };
-      await user.upload(within(dialog).getByLabelText("Release plan file"), planFile(next, "next.json"));
-      await user.click(within(dialog).getByRole("button", { name: "Load" }));
-      await user.click(await screen.findByRole("button", { name: "Replace" }, FIND));
-      expect(await screen.findByText("Plan loaded: Loaded Flip Plan", undefined, FIND)).toBeInTheDocument();
-      expect(isFlipped()).toBe(true);
-      expect(flipButton()).toHaveAttribute("aria-pressed", "true");
-      expect(epicTitles()).toEqual(["Epic Two"]);
-      expect(cell(1003, BETA).querySelector(".fcard")).not.toBeNull();
-      expect(JSON.stringify(savedPlan())).not.toMatch(/orientation|flipped/i);
     },
     FLOW_TIMEOUT_MS,
   );

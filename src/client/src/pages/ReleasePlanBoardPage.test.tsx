@@ -1,30 +1,18 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { replaceBoardMessage } from "../components/releasePlan/ReplaceBoardDialog";
 import type { AdoBacklog } from "../lib/releasePlan/adoTypes";
-import { planToJson } from "../lib/releasePlan/exportFile";
 import { planFromBacklog } from "../lib/releasePlan/fromBacklog";
 import type { PlanStorage } from "../lib/releasePlan/storage";
-import type { ReleasePlan } from "../lib/releasePlan/types";
 import { FakeImage, RecordingContext, stubCanvas } from "../test/canvas";
 import { makeBacklog, makeConnection, makeFeatureItem } from "../test/adoFixtures";
-import { makeEpic, makeFeature, makeMilestone, samplePlan, sequentialIds, sprintsPlan } from "../test/releasePlanFixtures";
+import { makeEpic, makeFeature, samplePlan, sequentialIds, sprintsPlan } from "../test/releasePlanFixtures";
 import { BOARD_TEST_TIMEOUT_MS, renderBoard } from "../test/renderBoard";
 
 const location = () => screen.getByTestId("location").textContent;
 const summaryBox = (name: string) => within(screen.getByRole("region", { name: "Milestone summary" })).getByRole("group", { name });
 const featureCount = (name: string) => summaryBox(name).querySelector(".n")?.textContent;
 const zoomValue = () => screen.getByTestId("zoom-value").textContent;
-
-function readBlob(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
-    reader.readAsText(blob);
-  });
-}
 
 describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
   it("redirects to /release-plan when there is no plan", () => {
@@ -47,8 +35,6 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     expect(draggable.every((el) => el.matches(".epic, .fcard"))).toBe(true);
     expect(draggable).toHaveLength(3 + 5);
     expect([...container.querySelectorAll('[draggable="false"]')].map((el) => el.textContent)).toEqual(["◀", "▶", "◀", "▶", "◀", "▶"]);
-    expect(screen.getByRole("button", { name: "Load Plan" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Plan" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export PNG" })).toBeInTheDocument();
   });
 
@@ -199,21 +185,21 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     });
   });
 
-  it("shows Sync from ADO, Load Plan, Save Plan and Export PNG in both the Board and Table views", () => {
+  it("shows Sync from ADO and Export PNG in both the Board and Table views", () => {
     renderBoard(samplePlan());
     const toolbarButtons = () => screen.getAllByRole("button").filter((b) => b.closest(".toolbar")).map((b) => b.textContent);
-    expect(toolbarButtons().slice(-4)).toEqual(["Sync from ADO", "Load Plan", "Save Plan", "Export PNG"]);
+    expect(toolbarButtons().slice(-2)).toEqual(["Sync from ADO", "Export PNG"]);
     fireEvent.click(screen.getByRole("tab", { name: "Table" }));
     expect(screen.queryByRole("group", { name: "Zoom" })).not.toBeInTheDocument();
-    expect(toolbarButtons().slice(-4)).toEqual(["Sync from ADO", "Load Plan", "Save Plan", "Export PNG"]);
-    expect(screen.getByRole("button", { name: "Load Plan" })).toHaveClass("btn");
-    expect(screen.getByRole("button", { name: "Save Plan" })).toHaveClass("btn");
+    expect(toolbarButtons().slice(-2)).toEqual(["Sync from ADO", "Export PNG"]);
+    expect(screen.queryByRole("button", { name: "Load Plan" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Plan" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Export PNG" })).toHaveClass("btn", "primary");
     expect(screen.getByRole("button", { name: "Export PNG" })).toBeEnabled();
     expect(document.querySelector(".rp .toolbar .spacer")).not.toBeNull();
   });
 
-  it("shows a decorative icon before the Sync from ADO / Load Plan / Save Plan labels in both views", () => {
+  it("shows a decorative icon before the Sync from ADO label in both views", () => {
     const { container } = renderBoard(samplePlan());
     const toolbar = () => {
       const el = container.querySelector<HTMLElement>(".rp .toolbar");
@@ -221,7 +207,7 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
       return el;
     };
     const expectIcons = () => {
-      for (const name of ["Sync from ADO", "Load Plan", "Save Plan"]) {
+      for (const name of ["Sync from ADO"]) {
         const button = within(toolbar()).getByRole("button", { name });
         const svg = button.querySelector("svg");
         expect(svg).not.toBeNull();
@@ -233,52 +219,6 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     expectIcons();
     fireEvent.click(within(toolbar()).getByRole("tab", { name: "Table" }));
     expectIcons();
-  });
-
-  describe("Save Plan", () => {
-    const NOW = new Date("2026-10-21T09:15:00.000Z");
-    let blobs: Blob[] = [];
-    let downloads: string[] = [];
-
-    beforeEach(() => {
-      vi.useFakeTimers({ toFake: ["Date"] });
-      vi.setSystemTime(NOW);
-      blobs = [];
-      downloads = [];
-      Object.assign(URL, {
-        createObjectURL: (blob: Blob) => {
-          blobs.push(blob);
-          return "blob:plan";
-        },
-        revokeObjectURL: () => undefined,
-      });
-      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
-        downloads.push(this.download);
-      });
-    });
-
-    afterEach(() => {
-      vi.useRealTimers();
-      vi.restoreAllMocks();
-    });
-
-    it("downloads the plan JSON as <name>_<date>.json, toasts, and leaves the store untouched", async () => {
-      const plan = samplePlan();
-      const save = vi.fn<PlanStorage["save"]>();
-      renderBoard(null, { load: () => plan, save });
-      const savesBefore = save.mock.calls.length;
-      fireEvent.click(screen.getByRole("button", { name: "Save Plan" }));
-
-      expect(downloads).toEqual(["Sample_Release_Plan_2026-10-21.json"]);
-      expect(blobs).toHaveLength(1);
-      expect(blobs[0].type).toBe("application/json");
-      expect(await readBlob(blobs[0])).toBe(planToJson(plan, NOW));
-      expect(JSON.parse(await readBlob(blobs[0]))).toMatchObject({ schema: "release-planner-features", version: 1, savedAt: NOW.toISOString() });
-      expect(screen.getAllByRole("status").some((s) => s.textContent === "Plan saved")).toBe(true);
-      // No store change: no autosave and no savedAt in the in-memory plan.
-      expect(save.mock.calls.length).toBe(savesBefore);
-      expect(screen.getByLabelText("Plan name")).toHaveValue("Sample Release Plan");
-    });
   });
 
   describe("Export PNG", () => {
@@ -329,80 +269,6 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     });
   });
 
-  describe("Load Plan", () => {
-    const planFile = (plan: ReleasePlan, name = "other.json") => new File([JSON.stringify(plan)], name, { type: "application/json" });
-    const otherPlan = () => samplePlan({ name: "Other Plan", milestones: [makeMilestone({ id: "ms_x", name: "Gamma" })], epics: [makeEpic({ id: 7, title: "Loaded Epic", features: [makeFeature({ id: 71, title: "Loaded Feature", milestoneId: "ms_x" })] })] });
-    const loadDialog = () => screen.getByRole("dialog", { name: "Load a plan" });
-
-    async function chooseFile(file: File) {
-      const user = userEvent.setup();
-      fireEvent.click(screen.getByRole("button", { name: "Load Plan" }));
-      await user.upload(within(loadDialog()).getByLabelText("Release plan file"), file);
-      await user.click(within(loadDialog()).getByRole("button", { name: "Load" }));
-      return user;
-    }
-
-    it("shows an invalid file's error inline and keeps the board", async () => {
-      renderBoard(samplePlan());
-      await chooseFile(new File(["{oops"], "bad.json", { type: "application/json" }));
-      expect(await within(loadDialog()).findByRole("alert")).toHaveTextContent("Could not read the file: it is not valid JSON.");
-      expect(screen.queryByRole("dialog", { name: "Replace the current board?" })).not.toBeInTheDocument();
-      expect(screen.getByLabelText("Plan name")).toHaveValue("Sample Release Plan");
-    });
-
-    it("asks to replace the board; Replace loads it, closes the dialogs, toasts and stays on the board", async () => {
-      renderBoard(samplePlan());
-      const user = await chooseFile(planFile(otherPlan()));
-      const confirm = await screen.findByRole("dialog", { name: "Replace the current board?" });
-      expect(confirm).toHaveTextContent(replaceBoardMessage("Sample Release Plan", "Other Plan"));
-      await user.click(within(confirm).getByRole("button", { name: "Replace" }));
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-      expect(screen.getByLabelText("Plan name")).toHaveValue("Other Plan");
-      expect(summaryBox("Gamma")).toBeInTheDocument();
-      expect(screen.getByText("Loaded Feature")).toBeInTheDocument();
-      expect(screen.getAllByRole("status").some((s) => s.textContent === "Plan loaded: Other Plan")).toBe(true);
-      expect(location()).toBe("/release-plan/board");
-    });
-
-    it("Cancel closes only the confirmation and keeps the current board", async () => {
-      renderBoard(samplePlan());
-      const user = await chooseFile(planFile(otherPlan()));
-      const confirm = await screen.findByRole("dialog", { name: "Replace the current board?" });
-      await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
-      expect(screen.queryByRole("dialog", { name: "Replace the current board?" })).not.toBeInTheDocument();
-      expect(loadDialog()).toBeInTheDocument();
-      expect(screen.getByLabelText("Plan name")).toHaveValue("Sample Release Plan");
-      expect(summaryBox("MVP")).toBeInTheDocument();
-    });
-
-    it("clears the Ctrl+click selection and keeps the view and zoom after a load", async () => {
-      renderBoard(samplePlan());
-      const card = (title: string) => within(screen.getByRole("region", { name: "Board" })).getByRole("button", { name: new RegExp(title) });
-      fireEvent.click(card("Reports"), { ctrlKey: true });
-      expect(card("Reports")).toHaveClass("selected");
-      fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-      // Reload the same plan: the cards are the same, only the remount clears the selection.
-      const user = await chooseFile(planFile(samplePlan({ name: "Same Cards" })));
-      await user.click(await screen.findByRole("button", { name: "Replace" }));
-      expect(screen.getByLabelText("Plan name")).toHaveValue("Same Cards");
-      expect(card("Reports")).not.toHaveClass("selected");
-      expect(document.querySelectorAll(".fcard.selected")).toHaveLength(0);
-      expect(zoomValue()).toBe("110%");
-      expect(screen.getByRole("tab", { name: "Board" })).toHaveAttribute("aria-selected", "true");
-    });
-
-    it("closes the open work-item modal when a plan is loaded", async () => {
-      renderBoard(samplePlan());
-      fireEvent.click(within(screen.getByRole("region", { name: "Board" })).getByRole("button", { name: /Reports/ }));
-      expect(screen.getAllByRole("dialog")).toHaveLength(1);
-      const workItem = screen.getByRole("dialog");
-      expect(workItem).not.toHaveAccessibleName("Load a plan");
-      const user = await chooseFile(planFile(otherPlan()));
-      await user.click(await screen.findByRole("button", { name: "Replace" }));
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-  });
-
   describe("Sync from ADO", () => {
     const PAT = "sync-pat-value";
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -444,15 +310,6 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     }
     /** The read-only value shown next to a label in the sync dialog. */
     const shown = (label: string) => within(connectDialog()).getByText(label, { selector: "dt" }).nextElementSibling?.textContent;
-    const planFile = (plan: ReleasePlan) => new File([planToJson(plan, new Date("2026-10-23T10:00:00Z"))], "board.json", { type: "application/json" });
-    async function loadPlanFile(user: ReturnType<typeof userEvent.setup>, file: File) {
-      await user.click(screen.getByRole("button", { name: "Load Plan" }));
-      const dialog = screen.getByRole("dialog", { name: "Load a plan" });
-      await user.upload(within(dialog).getByLabelText("Release plan file"), file);
-      await user.click(within(dialog).getByRole("button", { name: "Load" }));
-      await user.click(await screen.findByRole("button", { name: "Replace" }));
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    }
 
     beforeEach(() => window.localStorage.clear());
     afterEach(() => {
@@ -495,43 +352,6 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
       expect(within(dialog).queryByRole("button", { name: "Preview changes" })).not.toBeInTheDocument();
       await user.click(within(dialog).getByRole("button", { name: "Close" }));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-
-    it("after Load Plan, the sync dialog shows the loaded file's connection", async () => {
-      const user = userEvent.setup();
-      const fetchMock = mockFetch();
-      renderBoard(adoPlan());
-      const other = planFromBacklog(
-        makeBacklog(),
-        makeConnection({ source: "onprem", projectUrl: "https://tfs.example.com/Coll/Other", scopeType: "iteration", scopePath: "Other\\Phase 2" }),
-        sequentialIds(),
-      );
-      await loadPlanFile(user, planFile({ ...other, name: "Other Board" }));
-      expect(screen.getByLabelText("Plan name")).toHaveValue("Other Board");
-      await user.click(screen.getByRole("button", { name: "Sync from ADO" }));
-      expect(shown("Azure DevOps source")).toBe("On-Prem");
-      expect(shown("Project URL")).toBe("https://tfs.example.com/Coll/Other");
-      expect(shown("Iteration path")).toBe("Other\\Phase 2");
-      expect(within(connectDialog()).queryByText("Area path")).not.toBeInTheDocument();
-      await openPreviewFromOpenDialog(user);
-      expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual({
-        source: "onprem",
-        projectUrl: "https://tfs.example.com/Coll/Other",
-        scopeType: "iteration",
-        scopePath: "Other\\Phase 2",
-        pat: PAT,
-      });
-    });
-
-    it("after Load Plan of a file without a connection, the sync dialog says the board isn't linked (not the previous board's connection)", async () => {
-      const user = userEvent.setup();
-      renderBoard(adoPlan());
-      await loadPlanFile(user, planFile(samplePlan({ name: "Plain Board" })));
-      await user.click(screen.getByRole("button", { name: "Sync from ADO" }));
-      const dialog = connectDialog();
-      expect(dialog).toHaveTextContent("isn't linked to an Azure DevOps project");
-      expect(dialog).not.toHaveTextContent("https://dev.azure.com/org/Proj");
-      expect(within(dialog).queryByLabelText("Personal Access Token")).not.toBeInTheDocument();
     });
 
     it("shows a backlog error inline and opens no preview", async () => {

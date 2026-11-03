@@ -432,16 +432,16 @@ Completed 2026-11-03 in 2 Develop ↔ QA cycles. `backend-developer` and `fronte
 - The full Vitest suite is occasionally flaky under load: a different 1–3 UI integration tests time out on each run, none in changed code, and they pass in isolation and on a re-run.
 
 ## Phase 3: Plan list and create-with-name (client)
-Status: Not started
+Status: Complete
 
 Agent: `frontend-developer`.
 
-- [ ] Rewrite `ReleasePlanHomePage`: remove the JSON card, the "Last board" section and `ReplaceBoardDialog` usage. Keep the "Create from Azure DevOps" card. Add `PlanList` below it.
-- [ ] Implement `components/releasePlan/PlanList.tsx` + `DeletePlanDialog.tsx` per *Implementation choices* (columns, pager, loading/empty/error states, delete confirm → `deletePlan` → toast → refetch; go back one page when the page becomes empty; abort in-flight requests on unmount/page change).
-- [ ] `AdoConnectModal` (`purpose="create"` only): add the required "Plan name" input (pre-filled after Connect with the default name, trimmed, 1–200 characters, inline error), and change the submit flow to backlog → `planFromBacklog` → name → `createPlan` → `onCreated(id, plan, warnings)`. POST errors show inline. Sync (`purpose="sync"`) is unchanged.
-- [ ] Home page `onCreated`: `loadPlan(id, plan)`, navigate to `/release-plan/<id>`, toast "Plan created: <name>" + warnings.
-- [ ] Delete `ImportJsonModal` (+ test) and the JSON-download parts of `exportFile.ts` (+ tests) that nothing uses any more. Keep `fileBase` if `useExportPng` uses it.
-- [ ] Unit tests: `PlanList` (render rows/labels/dates, paging, empty, error + retry, delete confirm/cancel, last-item-on-page delete), `DeletePlanDialog`, `AdoConnectModal` name field (pre-fill, validation, POST error inline, success callback), home page wiring.
+- [x] Rewrite `ReleasePlanHomePage`: remove the JSON card, the "Last board" section and `ReplaceBoardDialog` usage. Keep the "Create from Azure DevOps" card. Add `PlanList` below it.
+- [x] Implement `components/releasePlan/PlanList.tsx` + `DeletePlanDialog.tsx` per *Implementation choices* (columns, pager, loading/empty/error states, delete confirm → `deletePlan` → toast → refetch; go back one page when the page becomes empty; abort in-flight requests on unmount/page change).
+- [x] `AdoConnectModal` (`purpose="create"` only): add the required "Plan name" input (pre-filled after Connect with the default name, trimmed, 1–200 characters, inline error), and change the submit flow to backlog → `planFromBacklog` → name → `createPlan` → `onCreated(id, plan, warnings)`. POST errors show inline. Sync (`purpose="sync"`) is unchanged.
+- [x] Home page `onCreated`: `loadPlan(id, plan)`, navigate to `/release-plan/<id>`, toast "Plan created: <name>" + warnings.
+- [x] Delete `ImportJsonModal` (+ test) and the JSON-download parts of `exportFile.ts` (+ tests) that nothing uses any more. Keep `fileBase` if `useExportPng` uses it.
+- [x] Unit tests: `PlanList` (render rows/labels/dates, paging, empty, error + retry, delete confirm/cancel, last-item-on-page delete), `DeletePlanDialog`, `AdoConnectModal` name field (pre-fill, validation, POST error inline, success callback), home page wiring.
 
 ### Verification Plan
 - `cd src/client && npm run build && npm test -- --run` → build ok, all tests pass.
@@ -449,7 +449,32 @@ Agent: `frontend-developer`.
 - Server verification commands still pass (no server change expected; `git diff --stat src/server` is empty).
 
 ### Phase Summary
-_(write when phase completes)_
+**Done (2026-11-03).** Agents: `frontend-developer` (develop), `qa-engineer` (review and integration tests). 1 Develop ↔ QA cycle: QA passed with no Blocker or Major findings.
+
+- **Home page** (`pages/ReleasePlanHomePage.tsx`): only the "Create from Azure DevOps" card plus `PlanList`. `onCreated(id, plan, warnings)` → `loadPlan` → navigate `/release-plan/<id>` → toast "Plan created: <name>" + warning toasts.
+- **`components/releasePlan/PlanList.tsx`** implements the list exactly as described in *Implementation choices*. It aborts requests on page change and unmount and ignores stale responses. A failed delete shows an error toast with the server message. **`DeletePlanDialog.tsx`** wraps `ConfirmDialog` (title "Delete release plan").
+- **Create modal**: the shared `components/ado/AdoConnectModal.tsx` got an optional `nameField` prop (`label`, `defaultName`, `validate`). The name input appears after Connect, pre-filled and editable, is validated before `load`, and `load` receives the trimmed name as a 3rd argument. Monte Carlo doesn't pass it, so it is unchanged. The Release Plan wrapper (`components/releasePlan/AdoConnectModal.tsx`) has no `purpose` prop (Sync uses `AdoSyncModal`); it now takes `onCreated` instead of `onBacklog` and runs backlog → `planFromBacklog` → name → `createPlan`. Backlog and POST errors show inline. `lib/releasePlan/fromBacklog.ts` exports `defaultPlanName(project)`. `lib/releasePlan/planName.ts` has `validatePlanName` with the server's two messages.
+- **Deleted**: `ImportJsonModal`, `ReplaceBoardDialog` (both + tests), `planToJson` (in `exportFile.ts`; `fileBase` / `downloadBlob` stay for PNG), `ReleasePlanSaveLoad.integration.test.tsx` and `ReleasePlanToolbar.integration.test.tsx`.
+- **Pulled forward from Phase 4** (the Phase 3 grep requires it): the board toolbar's **Load Plan / Save Plan** buttons, their handlers in `ReleasePlanBoardPage` and the Load modal are removed.
+- **Interim (Phase 4 replaces it)**:
+  - The store (`releasePlanStore.tsx`) **additively** gained `planId` and `loadPlan(id, plan)`; `replacePlan` resets `planId` to null. localStorage storage is unchanged.
+  - `App.tsx` has an interim `/release-plan/:id` route that renders `ReleasePlanBoardPage` from the in-memory plan, and still has `/release-plan/board`. `test/render.tsx` has a `/release-plan/:id` stub route.
+  - Because the board page doesn't fetch by id yet, **clicking a plan in the list doesn't open it**: with an empty store it redirects back to `/release-plan`. Create works because `loadPlan` fills the store first.
+- **Tests**:
+  - Unit, by the developer: `PlanList` (11), `DeletePlanDialog` (3), `planName` (3), `AdoConnectModal` (+5 name-field cases, existing cases moved to `onCreated`), `ReleasePlanHomePage` (6, rewritten), store (+1).
+  - Existing integration tests were trimmed or adjusted only where they used removed features: `ReleasePlanAdo`, `ReleasePlanSync`, `ReleasePlanSyncConnection`, `ReleasePlan`, `ReleasePlanDnd`, `ReleasePlanFlip`, `ReleasePlanExportPng`, `AdoDefaultSource`, `App`, `SidebarCollapse`. Boards in tests are now seeded through localStorage instead of a JSON import.
+  - QA added `pages/ReleasePlanPersistenceList.integration.test.tsx` (14). It uses the real `App` and `planApi`, with a stateful fake `/api/plan` behind `fetch`, and covers paging, empty, delete (+ last item on page), delete 404, list 503/network + Retry, abort on unmount, create → POST body → `/release-plan/<id>`, name validation, and POST 422/503 shown inline.
+- **Verification**:
+  - `tsc -b`: OK. `vite build`: OK (to the scratchpad; see *Environment notes*).
+  - Client: 79 files / 822 tests pass (baseline: 79 / 842; the net change comes from removing the JSON features).
+  - The `ImportJsonModal|Import a JSON file` grep finds nothing. `git diff --stat src/server` is empty.
+  - Server: `compileall` OK; `pytest` without a DB: 831 passed / 41 skipped.
+- **Open Minors (for Phase 4)**:
+  1. `PlanList` doesn't refetch after a failed delete (e.g. a 404 because the plan was deleted elsewhere), so the stale row stays.
+  2. A page past the end (rows deleted elsewhere) shows the empty text even though `total > 0`; it should clamp to the last page.
+  3. Stale Save/Load Plan JSON comments remain in `lib/releasePlan/selectors.ts:242`, and `DownloadIcon`, `UploadIcon` and `FileJsonIcon` are possibly unused.
+  4. Lost coverage that Phase 4 must re-add with the id route: "the ADO connection survives a reload and Sync posts it" (it relied on localStorage restore).
+  5. QA covered abort on unmount but not abort on page change; the unit tests cover that one.
 
 ## Phase 4: Board persistence — routing, autosave, save, unsaved guard (client)
 Status: Not started
@@ -460,7 +485,7 @@ Agent: `frontend-developer`.
 - [ ] Store (`releasePlanStore.tsx`): remove the localStorage storage, `restoredFromStorage` and `consumeRestoredNotice`. Add `planId`, `loadPlan(id, plan)` and `clearPlan()`. Delete `lib/releasePlan/storage.ts` (+ test) and `STORAGE_KEY` usage, except for a one-time `removeItem("cmPlanningHub.releasePlan.v1")` on provider mount.
 - [ ] `ReleasePlanBoardPage`: load by `:id` (loading state; when the store already holds that id, e.g. right after create, skip the fetch), `normalizePlan`, the not-found/unreadable → toast + redirect handling, and clear the plan when leaving.
 - [ ] `usePlanPersistence(planId, plan)` hook: a change counter, 3 s debounce when autosave is on, `saveNow()`, the status (`saved | dirty | saving | error`), last-write-wins PUT `{name, state}`, a stale-response guard, the 404 → toast + redirect, and abort on unmount. The first plan load is `saved` (not dirty).
-- [ ] `BoardToolbar`: remove Load/Save Plan and their props. Add the Autosave switch (persisted via `autosavePreference`), the save status and the Save button rules. Remove the Load Plan modal / `ReplaceBoardDialog` / `planToJson` usage from `BoardWorkspace`. Delete `ReplaceBoardDialog` if it is now unused.
+- [ ] `BoardToolbar`: (Load/Save Plan, the Load modal and `ReplaceBoardDialog` were already removed in Phase 3.) Add the Autosave switch (persisted via `autosavePreference`), the save status and the Save button rules.
 - [ ] `UnsavedChangesDialog` + `useBlocker` (when status ≠ `saved`) + a `beforeunload` listener while dirty (Save / Discard / Cancel per *Decisions*).
 - [ ] Unit tests: hook (debounce timing with fake timers, coalescing several changes into one PUT, toggle off → no PUT, toggle on while dirty → PUT, failure → `error` + toast, stale response, 404), toolbar controls, board page load states, guard dialog (each button), `beforeunload` registered only while dirty, and that the old localStorage key is removed.
 - [ ] Update/remove the now-obsolete integration tests that rely on JSON save/load or localStorage restore (`ReleasePlanSaveLoad.integration.test.tsx`, the parts of others). `qa-engineer` rewrites the integration coverage in QA.

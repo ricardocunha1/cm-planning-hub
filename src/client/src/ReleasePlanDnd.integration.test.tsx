@@ -71,7 +71,6 @@ const PLAN = {
   ],
 };
 
-const planFile = () => new File([JSON.stringify(PLAN)], "dnd-plan.json", { type: "application/json" });
 
 const board = () => screen.getByRole("region", { name: "Board" });
 const epicEl = (id: number) => board().querySelector<HTMLElement>(`.epic[data-epic="${id}"]`) as HTMLElement;
@@ -86,12 +85,10 @@ function savedPlan(): { epics: Array<{ id: number; features: Array<{ id: number;
   return JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
 }
 
-async function importPlan(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /Import a JSON file/ }));
-  const dialog = screen.getByRole("dialog", { name: "Import a JSON file" });
-  await user.upload(within(dialog).getByLabelText("Release plan file"), planFile());
-  await user.click(within(dialog).getByRole("button", { name: "Create board" }));
-  expect(await screen.findByRole("region", { name: "Milestone summary" }, FIND)).toBeInTheDocument();
+/** Seeds the autosave with PLAN and opens the board (a saved plan is no longer imported from a JSON file). */
+function openBoard(): ReturnType<typeof renderApp> {
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(PLAN));
+  return renderApp("/release-plan/board");
 }
 
 describe("Release Plan – drag-and-drop full app flow (Phase 2)", () => {
@@ -109,8 +106,8 @@ describe("Release Plan – drag-and-drop full app flow (Phase 2)", () => {
     "import → drag a Feature to the next milestone → Table shows it → drag an Epic to first → order persists across a re-mount",
     async () => {
       const user = userEvent.setup();
-      const first = renderApp("/release-plan");
-      await importPlan(user);
+      const first = openBoard();
+      await screen.findByRole("region", { name: "Milestone summary" }, FIND);
       expect(screen.getByTestId("location")).toHaveTextContent("/release-plan/board");
       expect(summaryCount("Alpha")).toBe("2");
       expect(summaryCount("Beta")).toBe("1");
@@ -193,8 +190,8 @@ describe("Release Plan – drag-and-drop full app flow (Phase 2)", () => {
         frames.delete(id);
       });
       const user = userEvent.setup();
-      renderApp("/release-plan");
-      await importPlan(user);
+      openBoard();
+      await screen.findByRole("region", { name: "Milestone summary" }, FIND);
 
       // Track listeners added/removed from here on (the board is already mounted, so
       // re-mount it through Table → Board to capture its registrations).
