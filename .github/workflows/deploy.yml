@@ -3,6 +3,20 @@ on: workflow_dispatch
 jobs:
     deploy:
         runs-on: ubuntu-latest
+        services:
+            postgres:
+                image: postgres:17
+                env:
+                    POSTGRES_USER: planninghub
+                    POSTGRES_PASSWORD: planninghub
+                    POSTGRES_DB: planninghub
+                options: >-
+                    --health-cmd "pg_isready -U planninghub"
+                    --health-interval 5s
+                    --health-timeout 5s
+                    --health-retries 10
+                ports:
+                    - 5432:5432
         steps:
             - name: Checkout repository
               uses: actions/checkout@v7
@@ -32,6 +46,8 @@ jobs:
                 cache: npm
                 cache-dependency-path: src/client/package-lock.json
             - name: Test server
+              env:
+                TEST_DATABASE_URL: postgresql+asyncpg://planninghub:planninghub@localhost:5432/planninghub
               run: |
                 pip install -r src/server/requirements.txt
                 pytest src/server

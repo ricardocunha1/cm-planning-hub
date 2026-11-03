@@ -64,7 +64,12 @@ infra files: `docker-compose*.yml`, `.github/workflows/deploy.yml` and
   tests are **skipped** when it is unset. The Deploy workflow runs a
   `postgres:17` service container and sets it, so they always run in CI.
   Locally: `docker compose up -d db` and
-  `TEST_DATABASE_URL=postgresql+asyncpg://planninghub:planninghub@172.17.0.1:5432/planninghub_test`.
+  `TEST_DATABASE_URL=postgresql+asyncpg://planninghub:planninghub@172.17.0.1:5432/planninghub`.
+- **The database name is always `planninghub`** (user decision, 2026-11-03).
+  It is a constant in the server (no `DB_NAME` setting), in compose, CI and
+  Helm (no `postgres.database` value). There is no separate test database.
+  Tests use `planninghub` too and truncate `release_plans`, so running the DB
+  tests locally wipes the compose stack's plans (accepted: no volumes anyway).
 - **Postgres image**: official **`postgres:17`** (Debian; supports
   OpenShift's arbitrary UID) in compose, CI and Helm. **No volumes**: Helm
   uses an `emptyDir` at `PGDATA`, so **data is lost on pod restart**. This is
@@ -72,12 +77,11 @@ infra files: `docker-compose*.yml`, `.github/workflows/deploy.yml` and
 - **Credentials**: a Helm **Secret holds the DB username and password**. The
   Postgres pod reads it as `POSTGRES_USER` / `POSTGRES_PASSWORD`, and the
   server reads it as `DB_USER` / `DB_PASSWORD`. **The server builds the
-  connection string** from `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`
-  and `DB_NAME` (the last three are plain env vars). Values:
+  connection string** from `DB_USER`, `DB_PASSWORD`, `DB_HOST` and `DB_PORT`
+  (the last two are plain env vars) and the fixed database name `planninghub`. Values:
   `postgres.username` (default `planninghub`), `postgres.password`
   (**required**: `helm install … --set postgres.password=…`, via `required`,
-  so an install without it fails), `postgres.database` (default
-  `planninghub`).
+  so an install without it fails).
 - **`project_type` stores codes `onprem` / `cloud`** (same as
   `PlanSource.kind`). The client shows "On Prem" / "Collaboration Hub".
 - **Plan names are not unique.** They are trimmed, 1–200 characters.
@@ -122,7 +126,7 @@ infra files: `docker-compose*.yml`, `.github/workflows/deploy.yml` and
   → **503 `{errors: ["The release plan database is unavailable."]}`**. Other
   unexpected errors go to the existing generic 500 handler.
 - **Settings** (`app/config.py`, added to `Settings.from_env`): `DB_HOST`
-  (default `localhost`), `DB_PORT` (5432), `DB_NAME` (`planninghub`),
+  (default `localhost`), `DB_PORT` (5432),
   `DB_USER`, `DB_PASSWORD` (default `""`), `DB_MIGRATE_ON_STARTUP`,
   `DB_STARTUP_TIMEOUT_SECONDS`. The URL is built with
   `sqlalchemy.engine.URL.create(drivername="postgresql+asyncpg", …)`, which
@@ -132,8 +136,7 @@ infra files: `docker-compose*.yml`, `.github/workflows/deploy.yml` and
   else `pytest.skip`), a session-scoped fixture that runs the Alembic upgrade
   once, a per-test cleanup (`TRUNCATE release_plans RESTART IDENTITY`), and
   `db_client`, a `TestClient` with `get_session` overridden to the test DB.
-  The tests use a dedicated `planninghub_test` database (compose creates it
-  with an init script).
+  The tests use the same `planninghub` database (no separate test database).
 - **Client modules**: `lib/releasePlan/planApi.ts` (`listPlans`, `getPlan`,
   `createPlan`, `updatePlan`, `deletePlan`; reuses `ApiError`; GET/PUT/DELETE
   helpers next to `postJson` in `lib/ado/api.ts` or a shared `lib/http.ts`),
@@ -235,29 +238,98 @@ Mounted at **`/api/plan`**. JSON in/out. Errors are always `{errors: [str]}`:
 ```
 
 ## Phase 1: Database foundation and local/CI Postgres
-Status: Not started
+Status: Complete
 
 Agent: `backend-developer` (server + infra exception). No frontend work.
 
-- [ ] Add `sqlalchemy[asyncio]>=2.0`, `asyncpg`, `alembic` to `src/server/requirements.txt`.
-- [ ] Extend `Settings` in `app/config.py` with `db_host`, `db_port`, `db_name`, `db_user`, `db_password`, `db_migrate_on_startup`, `db_startup_timeout_seconds` (env names and defaults in *Implementation choices*), plus a `database_url()` helper using `URL.create`. Unit tests in `tests/test_config.py` (defaults, parsing, password escaping, `hide_password` rendering).
-- [ ] Create `app/db.py`: a lazy async engine / `async_sessionmaker` from settings, a `get_session` dependency (yields an `AsyncSession`), and `dispose_engine()`.
-- [ ] Create `app/models.py`: SQLAlchemy declarative `ReleasePlanRow` → table `release_plans` (`id` serial PK, `name` text NN, `created_at` / `updated_at` timestamptz NN default `now()`, `project_type` text NN, `project_name` text NN, `state` jsonb NN) plus an index on `(updated_at DESC, id DESC)`.
-- [ ] Add Alembic: `src/server/alembic.ini`, `src/server/migrations/env.py` (URL from `Settings`, async-aware, `target_metadata` from `app.models`), first revision `create_release_plans`. Update `src/server/Dockerfile` to copy `alembic.ini` and `migrations/`.
-- [ ] Add a FastAPI `lifespan` in `app/main.py`: when `db_migrate_on_startup`, retry connecting until `db_startup_timeout_seconds`, then run `alembic upgrade head` and dispose the engine on shutdown. Existing tests must still pass with no DB (they use `TestClient(app)` without a lifespan context; keep it that way, or make the lifespan a no-op when a test flag is set; document which).
-- [ ] `docker-compose.yml`: add service `db` (`postgres:17`, env `POSTGRES_USER/PASSWORD/DB = planninghub`, healthcheck `pg_isready`, port `5432:5432` for local tests, an init script `deploy/db/init-test-db.sql` mounted to `/docker-entrypoint-initdb.d/` that creates `planninghub_test`). Add `DB_HOST=db`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` to `server`, and make `server` `depends_on: db: condition: service_healthy`. No named volumes.
-- [ ] `tests/conftest.py`: add the `db_url` / migrated-schema / truncate / `db_client` fixtures (see *Implementation choices*) and a `db` pytest marker (registered in `pytest.ini`/`pyproject`). Add `tests/test_db_migrations.py`: the upgrade creates the table with the expected columns, types and defaults (query `information_schema`), and the downgrade drops it.
-- [ ] `.github/workflows/deploy.yml`: add a `services: postgres` (`postgres:17`, user/password/db for `planninghub_test`, health options, port 5432) to the job and set `TEST_DATABASE_URL` on the "Test server" step.
+- [x] Add `sqlalchemy[asyncio]>=2.0`, `asyncpg`, `alembic` to `src/server/requirements.txt`.
+- [x] Extend `Settings` in `app/config.py` with `db_host`, `db_port`, `db_user`, `db_password`, `db_migrate_on_startup`, `db_startup_timeout_seconds` (database name fixed to `planninghub`; env names and defaults in *Implementation choices*), plus a `database_url()` helper using `URL.create`. Unit tests in `tests/test_config.py` (defaults, parsing, password escaping, `hide_password` rendering).
+- [x] Create `app/db.py`: a lazy async engine / `async_sessionmaker` from settings, a `get_session` dependency (yields an `AsyncSession`), and `dispose_engine()`.
+- [x] Create `app/models.py`: SQLAlchemy declarative `ReleasePlanRow` → table `release_plans` (`id` serial PK, `name` text NN, `created_at` / `updated_at` timestamptz NN default `now()`, `project_type` text NN, `project_name` text NN, `state` jsonb NN) plus an index on `(updated_at DESC, id DESC)`.
+- [x] Add Alembic: `src/server/alembic.ini`, `src/server/migrations/env.py` (URL from `Settings`, async-aware, `target_metadata` from `app.models`), first revision `create_release_plans`. Update `src/server/Dockerfile` to copy `alembic.ini` and `migrations/`.
+- [x] Add a FastAPI `lifespan` in `app/main.py`: when `db_migrate_on_startup`, retry connecting until `db_startup_timeout_seconds`, then run `alembic upgrade head` and dispose the engine on shutdown. Existing tests must still pass with no DB (they use `TestClient(app)` without a lifespan context; keep it that way, or make the lifespan a no-op when a test flag is set; document which).
+- [x] `docker-compose.yml`: add service `db` (`postgres:17`, env `POSTGRES_USER/PASSWORD/DB = planninghub`, healthcheck `pg_isready`, port `5432:5432` for local tests). Add `DB_HOST=db`, `DB_USER`, `DB_PASSWORD` to `server`, and make `server` `depends_on: db: condition: service_healthy`. No named volumes.
+- [x] `tests/conftest.py`: add the `db_url` / migrated-schema / truncate / `db_client` fixtures (see *Implementation choices*) and a `db` pytest marker (registered in `pytest.ini`/`pyproject`). Add `tests/test_db_migrations.py`: the upgrade creates the table with the expected columns, types and defaults (query `information_schema`), and the downgrade drops it.
+- [x] `.github/workflows/deploy.yml`: add a `services: postgres` (`postgres:17`, user/password, db `planninghub`, health options, port 5432) to the job and set `TEST_DATABASE_URL` on the "Test server" step.
 
 ### Verification Plan
 - `python3 -m compileall -q src/server/app` → no output, exit 0.
 - `python3 -m pytest src/server -q` **without** `TEST_DATABASE_URL` → all previously passing tests pass, and DB tests are reported as skipped.
-- `docker compose up -d db` then `TEST_DATABASE_URL=postgresql+asyncpg://planninghub:planninghub@172.17.0.1:5432/planninghub_test python3 -m pytest src/server -q` → all pass, with 0 DB tests skipped.
+- `docker compose up -d db` then `TEST_DATABASE_URL=postgresql+asyncpg://planninghub:planninghub@172.17.0.1:5432/planninghub python3 -m pytest src/server -q` → all pass, with 0 DB tests skipped.
 - `docker compose up -d --build server db` → the server logs show the migration ran. `docker compose exec db psql -U planninghub -d planninghub -c '\d release_plans'` lists the 7 columns.
 - `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint` → no errors.
 
 ### Phase Summary
-_(write when phase completes)_
+Completed 2026-11-03 in 1 Develop ↔ QA cycle: `backend-developer` did the work and `qa-engineer` found no Blocker or Major issues.
+
+**What was built**
+- **Settings** (`app/config.py`):
+  - Adds `db_host`, `db_port`, `db_user`, `db_password` (`repr=False`), `db_migrate_on_startup` and `db_startup_timeout_seconds`.
+  - The database name is the module constant `DB_NAME = "planninghub"` (not configurable; a `DB_NAME` env var is ignored).
+  - Invalid values fall back to the defaults, with a warning.
+  - `Settings.database_url()` builds the URL with `URL.create("postgresql+asyncpg", …)`.
+- **`app/db.py`:**
+  - A lazy engine and `async_sessionmaker`; nothing connects at import time.
+  - `get_session`, the FastAPI dependency; Phase 2 routes use it.
+  - `dispose_engine()`.
+  - `wait_for_database()` retries `SELECT 1` with a 1 s backoff until the timeout, then re-raises. Its log lines hide the password.
+  - `migrate_to_head()` runs Alembic through `AsyncConnection.run_sync`, passing the connection in `config.attributes["connection"]`.
+  - `ALEMBIC_INI` is a path relative to the package.
+- **`app/models.py`:** `Base` and `ReleasePlanRow` (the `release_plans` table, plus the index `ix_release_plans_updated_at_id (updated_at DESC, id DESC)`).
+- **Alembic** (`src/server/alembic.ini`, `src/server/migrations/`):
+  - The only revision so far is `0001` (`create_release_plans`).
+  - `env.py` takes the connection from `config.attributes`, else `sqlalchemy.url`, else `Settings.database_url()`.
+  - `script_location = %(here)s/migrations`, so it works both from `src/server` and from `/app` in the image.
+  - The Dockerfile copies `alembic.ini` and `migrations/`.
+- **Lifespan** (`app/main.py`):
+  - When `DB_MIGRATE_ON_STARTUP` is true, it waits for the DB and then migrates to head. If the DB doesn't come up, startup fails.
+  - It disposes the engine in a `finally`.
+- **Test isolation (the documented choice):**
+  - Starlette runs the lifespan only inside `with TestClient(app)`.
+  - The existing tests use `TestClient(app)` without `with`, so they don't need a DB.
+  - **New DB-backed route tests must use the `db_client` fixture.**
+- **Compose:**
+  - New `db` service: `postgres:17`, user/password/db `planninghub`, `pg_isready` healthcheck, port 5432 published, no volumes.
+  - `server` gets `DB_HOST=db` and the `DB_*` env, and has `depends_on: db (service_healthy)`.
+- **CI** (`.github/workflows/deploy.yml`): a `postgres:17` service, and `TEST_DATABASE_URL` set on the "Test server" step.
+- **Test infrastructure:**
+  - `tests/db_helpers.py`: sync `alembic_config` and `run_sql`, using `asyncio.run` with `NullPool`. It's a separate module because `tests/` has no `__init__.py`.
+  - `conftest.py` fixtures: `db_url` (skips when `TEST_DATABASE_URL` is unset), `migrated_db` (session-scoped upgrade), `clean_db` (`TRUNCATE … RESTART IDENTITY`) and `db_client` (overrides `get_session`).
+  - The `db` marker is registered in `pytest.ini`.
+
+**Tests**
+- **Unit tests** (by the developer):
+  - About 30 new `test_config.py` cases.
+  - `test_db_migrations.py` (3, `db`): columns, types and defaults; the index; downgrade and re-upgrade.
+  - `test_lifespan.py` (2, no DB): migrate=false starts and serves `/api/health`; an unreachable DB fails startup.
+- **Integration tests** (by QA): `test_db_integration.py` (7, `db`):
+  - The lifespan migrates an empty schema, and a second start changes nothing.
+  - A wrong password does not leak.
+  - The engine is disposed on shutdown.
+  - The models match the migration head.
+  - A `get_session` round trip keeps JSONB as-is and gets the timestamps from the DB.
+  - NULL constraints are enforced.
+  - The index orders rows as expected.
+
+**Verification (re-run by the main session)**
+- `compileall`: OK.
+- `pytest` without a DB: 765 passed, 11 skipped (10 DB tests plus `test_ado_live`). The baseline was 738 passed, 1 skipped.
+- `pytest` with `TEST_DATABASE_URL`: 775 passed, 1 skipped (`test_ado_live`).
+- **Follow-up (user request): the DB name is always `planninghub`.** The `planninghub_test` DB and its init script were removed; CI and local tests use `planninghub` (and truncate `release_plans`). Re-verified: `pytest` without a DB 766 passed / 11 skipped; with `TEST_DATABASE_URL=…/planninghub` 776 passed / 1 skipped; actionlint clean. QA re-run: PASS, no Blocker/Major.
+- `docker compose up -d --build db server`: both are healthy, `\d release_plans` shows the 7 columns and the index, and `alembic_version` = `0001`.
+- actionlint: clean.
+- **Deviation from the Verification Plan:** the "Database migrations applied" line is logged at INFO through the `app` logger. Uvicorn's default logging doesn't show it, so the migration is confirmed through `alembic_version` instead.
+
+**Open Minor findings (not blocking)**
+1. Migration INFO logs are invisible under uvicorn; configure the `app` logger.
+2. No `pg_advisory_lock` around `alembic upgrade`. Concurrent replicas could race; this is harmless with `replicas: 1`.
+3. In `tests/conftest.py`, `from db_helpers import …` breaks the import order.
+4. `test_lifespan.py` uses a broad `pytest.raises(Exception)`.
+5. Compose `db` gets an **anonymous volume** from the `postgres:17` image's `VOLUME`, so data survives `up --force-recreate db` (reset with `docker compose down -v` or `up -V`). Not a spec defect (compose declares no volumes); optional fix: `tmpfs: [/var/lib/postgresql/data]` on `db` for parity with the Helm `emptyDir`.
+
+**Environment notes**
+- The devcontainer `python3` is 3.10; the image and CI use 3.12.
+- `src/client/dist/assets` is owned by root (from an older container build), so `npm run build` fails at the Vite write step until `dist` is removed. This was already the case before this work; the type-check passes.
 
 ## Phase 2: Plan API (server) and client data layer
 Status: Not started
@@ -337,11 +409,11 @@ Status: Not started
 Agent: `backend-developer` (Helm, infra exception). The main session does
 the README/spec edits after QA (docs). **Do not edit `AGENTS.md`.**
 
-- [ ] `helm/chart/values.yaml`: add `postgres: {image: postgres:17, username: planninghub, password: "", database: planninghub}` (with a comment that the password must be set with `--set postgres.password=…`).
+- [ ] `helm/chart/values.yaml`: add `postgres: {image: postgres:17, username: planninghub, password: ""}` (no `database` value: it is always `planninghub`) (with a comment that the password must be set with `--set postgres.password=…`).
 - [ ] `helm/chart/templates/cm-planning-hub-db-secret.yaml`: Secret `cm-planning-hub-db-secret` with keys `username` and `password`, where the password is `{{ required "postgres.password is required" .Values.postgres.password }}`.
-- [ ] `cm-planning-hub-db-deployment.yaml`: 1 replica, `postgres:17`, env `POSTGRES_USER` / `POSTGRES_PASSWORD` from the Secret, `POSTGRES_DB`, `PGDATA=/var/lib/postgresql/data/pgdata`, an `emptyDir` mounted at `/var/lib/postgresql/data`, readiness/liveness `pg_isready` exec probes, and resource requests/limits. No PVC.
+- [ ] `cm-planning-hub-db-deployment.yaml`: 1 replica, `postgres:17`, env `POSTGRES_USER` / `POSTGRES_PASSWORD` from the Secret, `POSTGRES_DB=planninghub`, `PGDATA=/var/lib/postgresql/data/pgdata`, an `emptyDir` mounted at `/var/lib/postgresql/data`, readiness/liveness `pg_isready` exec probes, and resource requests/limits. No PVC.
 - [ ] `cm-planning-hub-db-service.yaml`: ClusterIP `cm-planning-hub-db-service`, port 5432.
-- [ ] Server deployment: env `DB_HOST=cm-planning-hub-db-service`, `DB_PORT=5432`, `DB_NAME` (from values), and `DB_USER` / `DB_PASSWORD` via `secretKeyRef` to the Secret.
+- [ ] Server deployment: env `DB_HOST=cm-planning-hub-db-service`, `DB_PORT=5432` and `DB_USER` / `DB_PASSWORD` via `secretKeyRef` to the Secret.
 - [ ] Bump `tag` in `values.yaml` per the release convention only if the user asks (leave it otherwise).
 - [ ] Main session: README — Release Plan section (saved plans list, autosave/save, no JSON), local dev (`docker compose up -d db`, DB env vars, `TEST_DATABASE_URL`), and deployment (`--set postgres.password`, the data loss on DB pod restart). Add a note to `specs/release_plan.md` that its JSON import/export requirements are superseded by `specs/release_plan_persistence`.
 

@@ -6,3 +6,6 @@ numpy
 openpyxl
 pytest
 httpx
+sqlalchemy[asyncio]>=2.0
+asyncpg
+alembic
