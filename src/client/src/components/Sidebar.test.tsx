@@ -115,10 +115,10 @@ describe("Sidebar", () => {
       renderSidebar(path, { collapsed: true });
       const activeLink = screen.getByRole("link", { name: active });
       expect(activeLink).toHaveAttribute("aria-current", "page");
-      expect(activeLink).toHaveClass("bg-slate-800", "text-[color:var(--cm-teal)]");
+      expect(activeLink).toHaveClass("bg-surface-raised", "text-accent-teal");
       const inactiveLink = screen.getByRole("link", { name: inactive });
       expect(inactiveLink).not.toHaveAttribute("aria-current");
-      expect(inactiveLink).not.toHaveClass("bg-slate-800");
+      expect(inactiveLink).not.toHaveClass("bg-surface-raised");
     });
   });
 });

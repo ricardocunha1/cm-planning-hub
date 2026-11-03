@@ -29,15 +29,15 @@ function Section({ label, rows }: { label: string; rows: Row[] }) {
     return null;
   }
   return (
-    <details className="rounded border border-slate-700 bg-slate-950">
-      <summary className="cursor-pointer px-3 py-2 font-medium text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]">
+    <details className="rounded border border-line-strong bg-canvas">
+      <summary className="cursor-pointer px-3 py-2 font-medium text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]">
         {label}
       </summary>
-      <ul className="max-h-48 space-y-1 overflow-auto border-t border-slate-800 px-3 py-2 text-slate-300">
+      <ul className="max-h-48 space-y-1 overflow-auto border-t border-line px-3 py-2 text-fg-muted">
         {rows.map(({ key, item, detail }) => (
           <li key={key}>
-            <span className="text-slate-400">#{String(item.id)}</span> {item.title}
-            {detail ? <span className="text-slate-400"> ({detail})</span> : null}
+            <span className="text-fg-subtle">#{String(item.id)}</span> {item.title}
+            {detail ? <span className="text-fg-subtle"> ({detail})</span> : null}
           </li>
         ))}
       </ul>
@@ -90,9 +90,9 @@ function SyncPreview({ diff, onApply, onCancel }: { diff: SyncDiff; onApply: (re
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative flex max-h-full w-full max-w-xl flex-col rounded-lg border border-slate-700 bg-slate-900 shadow-xl"
+        className="relative flex max-h-full w-full max-w-xl flex-col rounded-lg border border-line-strong bg-surface shadow-xl"
       >
-        <div className="px-6 py-4 border-b border-slate-800">
+        <div className="px-6 py-4 border-b border-line">
           <h2 id={titleId} className="text-lg font-semibold">
             Sync from Azure DevOps
           </h2>
@@ -100,8 +100,8 @@ function SyncPreview({ diff, onApply, onCancel }: { diff: SyncDiff; onApply: (re
         <div className="space-y-3 overflow-y-auto px-6 py-5 text-sm">
           {empty ? (
             <>
-              <p className="text-slate-200">The board is up to date with Azure DevOps.</p>
-              {diff.iterationsChanged && <p className="text-slate-400">The iteration list will be refreshed.</p>}
+              <p className="text-fg-soft">The board is up to date with Azure DevOps.</p>
+              {diff.iterationsChanged && <p className="text-fg-subtle">The iteration list will be refreshed.</p>}
             </>
           ) : (
             <>
@@ -135,9 +135,9 @@ function SyncPreview({ diff, onApply, onCancel }: { diff: SyncDiff; onApply: (re
                   ...diff.goneFeatures.map((f) => ({ key: `gf-${String(f.id)}`, item: f })),
                 ]}
               />
-              <p className="text-slate-400">New Features are added to Unplanned. Existing planning is kept.</p>
+              <p className="text-fg-subtle">New Features are added to Unplanned. Existing planning is kept.</p>
               {gone > 0 && (
-                <label htmlFor={removeId} className="flex items-center gap-2 text-slate-200">
+                <label htmlFor={removeId} className="flex items-center gap-2 text-fg-soft">
                   <input
                     id={removeId}
                     type="checkbox"
@@ -151,11 +151,11 @@ function SyncPreview({ diff, onApply, onCancel }: { diff: SyncDiff; onApply: (re
             </>
           )}
         </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-800">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-line">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
+            className="rounded border border-line-bold px-4 py-2 text-sm font-medium text-fg-soft hover:bg-surface-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
           >
             Cancel
           </button>
@@ -163,7 +163,7 @@ function SyncPreview({ diff, onApply, onCancel }: { diff: SyncDiff; onApply: (re
             ref={applyRef}
             type="button"
             onClick={() => onApply(gone > 0 && removeGone)}
-            className="rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+            className="rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
             style={{ backgroundColor: "var(--cm-light-blue)" }}
           >
             Apply

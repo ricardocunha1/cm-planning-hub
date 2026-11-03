@@ -13,7 +13,7 @@ import { sourceInfo } from "../lib/releasePlan/selectors";
 import type { ReleasePlan } from "../lib/releasePlan/types";
 import { useReleasePlan } from "../releasePlanStore";
 
-const cardBase = "flex h-full w-full flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900 p-5 text-left";
+const cardBase = "flex h-full w-full flex-col gap-3 rounded-lg border border-line bg-surface p-5 text-left";
 
 const BOARD_PATH = "/release-plan/board";
 
@@ -69,11 +69,11 @@ export function ReleasePlanHomePage() {
     <ReleasePlanLayout>
       <div className="max-w-5xl mx-auto">
         {plan && (
-          <section aria-label="Last board" className="mb-8 flex flex-wrap items-center gap-4 rounded-lg border border-slate-700 bg-slate-900 p-4">
+          <section aria-label="Last board" className="mb-8 flex flex-wrap items-center gap-4 rounded-lg border border-line-strong bg-surface p-4">
             <div className="min-w-0 flex-1">
-              <p className="text-xs uppercase tracking-wide text-slate-400">Last board</p>
+              <p className="text-xs uppercase tracking-wide text-fg-subtle">Last board</p>
               <p className="truncate font-semibold">{plan.name}</p>
-              <p className="truncate text-sm text-slate-400">
+              <p className="truncate text-sm text-fg-subtle">
                 {sourceInfo(plan.source)}
                 {plan.savedAt ? ` · saved ${new Date(plan.savedAt).toLocaleString()}` : ""}
               </p>
@@ -88,7 +88,7 @@ export function ReleasePlanHomePage() {
           </section>
         )}
         <h3 className="text-2xl font-semibold">Create a release plan board</h3>
-        <p className="mt-2 text-slate-400">Choose where the board's Epics and Features come from.</p>
+        <p className="mt-2 text-fg-subtle">Choose where the board's Epics and Features come from.</p>
         <ul className="mt-8 grid gap-4 sm:grid-cols-2">
           <li>
             <button
@@ -102,7 +102,7 @@ export function ReleasePlanHomePage() {
                 </span>
                 <span className="text-lg font-semibold">Create from Azure DevOps</span>
               </span>
-              <span className="text-sm text-slate-300">Connect to an Azure DevOps project and build a board from its Epics and Features.</span>
+              <span className="text-sm text-fg-muted">Connect to an Azure DevOps project and build a board from its Epics and Features.</span>
             </button>
           </li>
           <li>
@@ -117,7 +117,7 @@ export function ReleasePlanHomePage() {
                 </span>
                 <span className="text-lg font-semibold">Import a JSON file</span>
               </span>
-              <span className="text-sm text-slate-300">Open a previously saved release plan from a JSON file.</span>
+              <span className="text-sm text-fg-muted">Open a previously saved release plan from a JSON file.</span>
             </button>
           </li>
         </ul>

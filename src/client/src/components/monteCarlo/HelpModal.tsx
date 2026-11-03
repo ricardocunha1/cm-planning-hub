@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 // Port of _help_modal.html.
-const code = "px-1 rounded bg-slate-800 border border-slate-700";
+const code = "px-1 rounded bg-surface-raised border border-line-strong";
 
 export function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   useEffect(() => {
@@ -24,16 +24,16 @@ export function HelpModal({ open, onClose }: { open: boolean; onClose: () => voi
   return (
     <div className="flex fixed inset-0 z-50 items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 sticky top-0 bg-slate-900">
+      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-lg border border-line-strong bg-surface shadow-xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-line sticky top-0 bg-surface">
           <h2 id="help-modal-title" className="text-lg font-semibold">How to Use This Application</h2>
-          <button type="button" aria-label="Close" onClick={onClose} className="text-slate-400 hover:text-slate-100 text-xl leading-none">
+          <button type="button" aria-label="Close" onClick={onClose} className="text-fg-subtle hover:text-fg text-xl leading-none">
             &times;
           </button>
         </div>
-        <div className="px-6 py-5 space-y-6 text-sm text-slate-300">
+        <div className="px-6 py-5 space-y-6 text-sm text-fg-muted">
           <section>
-            <h3 className="text-base font-semibold text-slate-100 mb-2">Overview</h3>
+            <h3 className="text-base font-semibold text-fg mb-2">Overview</h3>
             <p>
               This tool forecasts how many sprints are needed to hit a target (Items
               Resolved or Story Points) by running a Monte Carlo simulation against
@@ -62,40 +62,40 @@ export function HelpModal({ open, onClose }: { open: boolean; onClose: () => voi
           </section>
 
           <section>
-            <h3 className="text-base font-semibold text-slate-100 mb-2">Excel File Structure</h3>
+            <h3 className="text-base font-semibold text-fg mb-2">Excel File Structure</h3>
             <p className="mb-2">
               The uploaded <code className={code}>.xlsx</code> file must contain a sheet (the
               first sheet is used) with one row per work item, including at least these
               columns:
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full text-left border border-slate-700 rounded overflow-hidden">
-                <thead className="bg-slate-800 text-slate-200">
+              <table className="w-full text-left border border-line-strong rounded overflow-hidden">
+                <thead className="bg-surface-raised text-fg-soft">
                   <tr>
-                    <th className="px-3 py-2 border-b border-slate-700">Column</th>
-                    <th className="px-3 py-2 border-b border-slate-700">Description</th>
+                    <th className="px-3 py-2 border-b border-line-strong">Column</th>
+                    <th className="px-3 py-2 border-b border-line-strong">Description</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <td className="px-3 py-2 border-b border-slate-800 align-top whitespace-nowrap font-mono text-xs">State</td>
-                    <td className="px-3 py-2 border-b border-slate-800">
+                    <td className="px-3 py-2 border-b border-line align-top whitespace-nowrap font-mono text-xs">State</td>
+                    <td className="px-3 py-2 border-b border-line">
                       Work item status. Only rows with state <code className={code}>Resolved</code>,{" "}
                       <code className={code}>Done</code>, or <code className={code}>Closed</code>{" "}
                       (case-sensitive) count toward a sprint.
                     </td>
                   </tr>
                   <tr>
-                    <td className="px-3 py-2 border-b border-slate-800 align-top whitespace-nowrap font-mono text-xs">Iteration Path</td>
-                    <td className="px-3 py-2 border-b border-slate-800">
+                    <td className="px-3 py-2 border-b border-line align-top whitespace-nowrap font-mono text-xs">Iteration Path</td>
+                    <td className="px-3 py-2 border-b border-line">
                       The item's sprint/iteration, e.g. <code className={code}>Project\Sprint 7</code>.
                       Only the last segment after the final <code className={code}>\</code> is used
                       as the sprint name.
                     </td>
                   </tr>
                   <tr>
-                    <td className="px-3 py-2 border-b border-slate-800 align-top whitespace-nowrap font-mono text-xs">Resolved Date</td>
-                    <td className="px-3 py-2 border-b border-slate-800">
+                    <td className="px-3 py-2 border-b border-line align-top whitespace-nowrap font-mono text-xs">Resolved Date</td>
+                    <td className="px-3 py-2 border-b border-line">
                       The date the item was resolved. Used to determine each sprint's most
                       recent activity and its recency rank. Must use the format{" "}
                       <code className={code}>MM/dd/yyyy [hh:mm]</code> (month first, time
@@ -120,7 +120,7 @@ export function HelpModal({ open, onClose }: { open: boolean; onClose: () => voi
           </section>
 
           <section>
-            <h3 className="text-base font-semibold text-slate-100 mb-2">Tips</h3>
+            <h3 className="text-base font-semibold text-fg mb-2">Tips</h3>
             <ul className="list-disc list-inside space-y-1">
               <li>Use "Exclude Latest Sprints from Sampling" to leave out in-progress or partial sprints from the random sampling pool.</li>
               <li>"Team Capacity Factor" scales historical Items Resolved and Story Points to model capacity changes (e.g. 1.2 for 20% more capacity).</li>

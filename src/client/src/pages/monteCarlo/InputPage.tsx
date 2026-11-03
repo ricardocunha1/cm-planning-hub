@@ -24,7 +24,7 @@ export const DEFAULT_FORM_VALUES = {
 type FormValues = typeof DEFAULT_FORM_VALUES;
 type TextField = Exclude<keyof FormValues, "skip_validation">;
 
-const inputClass = "w-full rounded bg-slate-800 border border-slate-700 px-3 py-2";
+const inputClass = "w-full rounded bg-surface-raised border border-line-strong px-3 py-2";
 const labelClass = "flex items-center gap-1 text-sm font-medium mb-1";
 
 function Required() {
@@ -147,7 +147,7 @@ export function InputPage() {
               checked={values.skip_validation}
               onChange={(event) => setValues((current) => ({ ...current, skip_validation: event.target.checked }))}
             />
-            <div className="w-11 h-6 rounded-full bg-slate-700 transition-colors peer-checked:bg-[var(--cm-light-blue)] peer-focus-visible:ring-2 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-slate-950 peer-focus-visible:ring-[var(--cm-light-blue)]" />
+            <div className="w-11 h-6 rounded-full bg-surface-overlay transition-colors peer-checked:bg-[var(--cm-light-blue)] peer-focus-visible:ring-2 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-canvas peer-focus-visible:ring-[var(--cm-light-blue)]" />
             <div className="absolute left-1 top-1 h-4 w-4 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
           </label>
           <label className="flex items-center gap-1" htmlFor="skip_validation">

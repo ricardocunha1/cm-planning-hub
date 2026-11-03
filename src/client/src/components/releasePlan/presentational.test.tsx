@@ -46,7 +46,10 @@ describe("SizeBadge / StateMark", () => {
 describe("MilestoneChip / FlagChip", () => {
   it("colors a milestone chip and shows a gold Unplanned chip", () => {
     const { rerender } = render(<MilestoneChip milestone={makeMilestone({ id: "a", name: "MVP", color: "#60C5B5" })} />);
-    expect(screen.getByText("MVP")).toHaveStyle({ color: "#60C5B5", borderColor: "#60C5B5", background: "#60C5B52e" });
+    const chip = screen.getByText("MVP");
+    expect(chip).toHaveStyle({ borderColor: "#60C5B5", background: "#60C5B52e" });
+    // The text color comes from --chip-c (releasePlan.css darkens it in the light theme).
+    expect(chip.style.getPropertyValue("--chip-c")).toBe("#60C5B5");
     rerender(<MilestoneChip milestone={null} />);
     expect(screen.getByText("Unplanned")).toHaveClass("chip", "none");
   });

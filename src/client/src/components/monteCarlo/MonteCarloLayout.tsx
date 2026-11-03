@@ -21,7 +21,7 @@ export function MonteCarloLayout({
 
   return (
     <Layout title={`${HUB_NAME} – Monte Carlo – ${pageTitle}`}>
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-3 border-b border-slate-800 bg-slate-900">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-3 border-b border-line bg-surface">
         <div className="col-start-2">
           <Breadcrumb currentStep={currentStep} />
         </div>
