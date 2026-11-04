@@ -155,7 +155,7 @@ harness's config, not in the agent files:
 - Claude Code: `.claude/settings.json` →
   `env.CLAUDE_CODE_SUBAGENT_MODEL = "claude-sonnet-5-5"`.
 - OpenCode: `opencode.json` → `agent.<name>.model =
-  "anthropic/claude-sonnet-5-5"` (add an entry when adding an agent).
+  "github-copilot/claude-sonnet-5.5"` (add an entry when adding an agent).
 
 ### Planning (only on request)
 
