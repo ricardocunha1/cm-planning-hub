@@ -27,7 +27,7 @@ After adding the Release Plan app inside CM Planning Hub, user must be able to s
 2. Create a new board by importing a previously exported JSON file.
 
 For 1., after the user clicks the card, a modal page opens where the user needs to:
-    - Select the AzureDevOps source - "On-Prem" or "Collaboration Hub" (online)
+    - Select the AzureDevOps source - "On-Prem" or "Collaboration Hub" (online). Changing the source clears the project URL so the new source's placeholder shows (the PAT is kept).
     - Select the AzureDevOps project URL (for example `https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/<PROJECT_NAME>` (On Prem) or `https://dev.azure.com/<ORGANIZATION_ID>/<PROJECT_NAME>` (Collaboration Hub))
     - Enter a PAT Token (Personal Access Token) for authentication.
     - After URL and Token are validated, the user can proceed to select either an   area path or an iteration path. One of the two MUST be selected.

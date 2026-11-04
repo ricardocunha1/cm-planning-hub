@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ADO_CONNECTION_KEY } from "../../lib/releasePlan/constants";
 import type { ReleasePlan } from "../../lib/releasePlan/types";
+import { PLACEHOLDER } from "../../lib/ado/url";
 import { makeBacklog, makeConnectResponse } from "../../test/adoFixtures";
 import { AdoConnectModal } from "./AdoConnectModal";
 
@@ -71,6 +72,22 @@ describe("AdoConnectModal", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.localStorage.clear();
+  });
+
+  it("clears the Project URL (not the PAT) when the source changes, showing the new placeholder", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.type(urlInput(), URL_OK);
+    await user.type(patInput(), PAT);
+    await user.click(screen.getByRole("radio", { name: "On-Prem" }));
+    expect(urlInput()).toHaveValue("");
+    expect(urlInput()).toHaveAttribute("placeholder", PLACEHOLDER.onprem);
+    expect(patInput()).toHaveValue(PAT);
+    await user.type(urlInput(), "https://x/y");
+    await user.click(screen.getByRole("radio", { name: "Collaboration Hub" }));
+    expect(urlInput()).toHaveValue("");
+    expect(urlInput()).toHaveAttribute("placeholder", PLACEHOLDER.cloud);
+    expect(patInput()).toHaveValue(PAT);
   });
 
   it("renders nothing when closed", () => {

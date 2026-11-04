@@ -269,6 +269,7 @@ function AdoConnectDialog<T>({
                       checked={source === value}
                       onChange={() => {
                         setSource(value);
+                        setProjectUrl("");
                         editConnection();
                       }}
                       className="accent-[color:var(--cm-light-blue)]"
