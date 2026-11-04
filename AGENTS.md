@@ -38,11 +38,15 @@ in `src/client/src/lib/tools.ts`):
 ┌──────────────────────────────┐        ┌──────────────────────────────┐
 │ client  (nginx, port 8080)   │ /api/* │ server  (uvicorn, port 8000) │
 │ React SPA static files       ├───────►│ FastAPI "Planning Hub API"   │
-│ SPA fallback (try_files)     │        │ stateless, no database       │
-└──────────────────────────────┘        └──────────────┬───────────────┘
-                                                       │ REST (PAT from the request,
-                                                       ▼ never stored; host allowlist)
-                                                 Azure DevOps
+│ SPA fallback (try_files)     │        │                              │
+└──────────────────────────────┘        └───────┬──────────────┬───────┘
+                                                │ SQL          │ REST (PAT from the request,
+                                                ▼              ▼ never stored; host allowlist)
+                                  ┌──────────────────────────┐ Azure DevOps
+                                  │ database  (port 5432)    │
+                                  │ PostgreSQL 17            │
+                                  │                          │
+                                  └──────────────────────────┘
 ```
 
 - The **client** serves the SPA and proxies `/api/` to the server
@@ -62,11 +66,14 @@ in `src/client/src/lib/tools.ts`):
 - `cm-planning-hub-client-deployment` / `-service` and
   `cm-planning-hub-server-deployment` / `-service` (Services expose port 80
   → 8080 / 8000).
+- `cm-planning-hub-db-deployment` / `-service`: PostgreSQL for Release Plan persistence. Its ClusterIP Service exposes
+  port 5432 inside the cluster only; the ingress does not route to it.
 - `cm-planning-hub-ingress` routes `/api` → server and `/` → client at
   `public_http_address`.
 - `values.yaml`: registry `dev.criticalmanufacturing.io`, image names, one
   shared `tag` for both images, `adoAllowedHosts` (passed to the server as
-  `ADO_ALLOWED_HOSTS`).
+  `ADO_ALLOWED_HOSTS`), `postgres` (database image and the Secret that holds
+  its credentials).
 
 Both images run as non-root (OpenShift). Releases are built by the manual
 **Deploy** GitHub workflow (`.github/workflows/deploy.yml`): GitVersion tag →
