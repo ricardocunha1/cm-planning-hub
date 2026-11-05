@@ -1,0 +1,183 @@
+{
+  "releases": {
+    "schema": "release-planner-features",
+    "version": 1,
+    "mode": "releases",
+    "name": "Releases board",
+    "source": {
+      "system": "Azure DevOps",
+      "project": "Fabrikam Plant",
+      "scope": "Fabrikam\\Phase 1",
+      "fetchedAt": "2026-10-23T10:00:00.000Z",
+      "kind": "onprem",
+      "projectUrl": "https://tfs.example.com/DefaultCollection/Fabrikam",
+      "scopeType": "iteration",
+      "scopePath": "Fabrikam\\Phase 1"
+    },
+    "iterations": [
+      {
+        "path": "Fabrikam\\Phase 1\\Sprint 01",
+        "finishDate": "2026-10-30"
+      },
+      {
+        "path": "Fabrikam\\Phase 1\\Sprint 02",
+        "finishDate": ""
+      }
+    ],
+    "milestones": [
+      {
+        "id": "ms_rel0001",
+        "name": "MVP",
+        "date": "",
+        "color": "#4E98D1"
+      },
+      {
+        "id": "ms_rel0002",
+        "name": "R2",
+        "date": "2026-12-31",
+        "color": "#60C5B5"
+      }
+    ],
+    "flags": [],
+    "epics": [
+      {
+        "id": 101,
+        "title": "Platform",
+        "state": "Active",
+        "description": "<p>Platform epic</p>",
+        "features": [
+          {
+            "id": 102,
+            "title": "Login",
+            "state": "New",
+            "description": "<p>d</p>",
+            "size": "M",
+            "iterationPath": "Fabrikam\\Phase 1\\Sprint 02",
+            "milestoneId": "ms_rel0001"
+          },
+          {
+            "id": "103",
+            "title": "Reports",
+            "state": "",
+            "description": "",
+            "size": "XL",
+            "iterationPath": "",
+            "milestoneId": null
+          }
+        ]
+      },
+      {
+        "id": "no-epic",
+        "title": "Features without an Epic",
+        "state": "",
+        "description": "",
+        "features": [
+          {
+            "id": 104,
+            "title": "Orphan",
+            "state": "",
+            "description": "",
+            "size": "",
+            "iterationPath": "",
+            "milestoneId": "ms_rel0002"
+          }
+        ]
+      }
+    ]
+  },
+  "sprints": {
+    "schema": "release-planner-features",
+    "version": 1,
+    "mode": "sprints",
+    "name": "Sprints board",
+    "savedAt": "2026-10-23T10:05:00.000Z",
+    "source": {
+      "system": "Azure DevOps",
+      "project": "Fabrikam Plant",
+      "kind": "onprem",
+      "projectUrl": "https://tfs.example.com/DefaultCollection/Fabrikam",
+      "scopeType": "iteration",
+      "scopePath": "Fabrikam\\Phase 1"
+    },
+    "iterations": [],
+    "milestones": [
+      {
+        "id": "ms_spr0001",
+        "name": "Sprint 01",
+        "date": "2026-10-30",
+        "color": "#4E98D1"
+      },
+      {
+        "id": "ms_spr0002",
+        "name": "Sprint 02",
+        "date": "",
+        "color": "#60C5B5"
+      },
+      {
+        "id": "ms_spr0003",
+        "name": "Sprint 03",
+        "date": "2026-11-27",
+        "color": "#EBC160"
+      }
+    ],
+    "flags": [
+      {
+        "id": "fl_freeze1",
+        "name": "Freeze",
+        "date": "2026-11-01",
+        "afterMsId": "ms_spr0001"
+      },
+      {
+        "id": "fl_golive",
+        "name": "Milestone",
+        "date": "",
+        "afterMsId": "ms_spr0003"
+      }
+    ],
+    "epics": [
+      {
+        "id": 101,
+        "title": "Platform",
+        "state": "Active",
+        "description": "<p>Platform epic</p>",
+        "features": [
+          {
+            "id": 102,
+            "title": "Login",
+            "state": "New",
+            "description": "<p>d</p>",
+            "size": "M",
+            "iterationPath": "Fabrikam\\Phase 1\\Sprint 02",
+            "milestoneId": "ms_spr0001"
+          },
+          {
+            "id": "103",
+            "title": "Reports",
+            "state": "",
+            "description": "",
+            "size": "XL",
+            "iterationPath": "",
+            "milestoneId": null
+          }
+        ]
+      },
+      {
+        "id": "no-epic",
+        "title": "Features without an Epic",
+        "state": "",
+        "description": "",
+        "features": [
+          {
+            "id": 104,
+            "title": "Orphan",
+            "state": "",
+            "description": "",
+            "size": "",
+            "iterationPath": "",
+            "milestoneId": "ms_spr0003"
+          }
+        ]
+      }
+    ]
+  }
+}

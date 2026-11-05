@@ -32,13 +32,13 @@ in `src/client/src/lib/tools.ts`):
 ## Architecture
 
 ```text
- Browser
-    │  http(s)
-    ▼
+ Browser ─────────────────────────────────────┐     AI agent (MCP client)
+    │  / (static files)                       │ /api/*        │ /api/mcp
+    ▼                                         ▼               ▼
 ┌──────────────────────────────┐        ┌──────────────────────────────┐
-│ client  (nginx, port 8080)   │ /api/* │ server  (uvicorn, port 8000) │
-│ React SPA static files       ├───────►│ FastAPI "Planning Hub API"   │
-│ SPA fallback (try_files)     │        │                              │
+│ client  (nginx, port 8080)   │        │ server  (uvicorn, port 8000) │
+│ React SPA static files       │        │ FastAPI "Planning Hub API"   │
+│ SPA fallback (try_files)     │        │ + MCP server (/api/mcp)      │
 └──────────────────────────────┘        └───────┬──────────────┬───────┘
                                                 │ SQL          │ REST (PAT from the request,
                                                 ▼              ▼ never stored; host allowlist)
@@ -49,14 +49,21 @@ in `src/client/src/lib/tools.ts`):
                                   └──────────────────────────┘
 ```
 
-- The **client** serves the SPA and proxies `/api/` to the server
-  (`API_UPSTREAM`, default `http://server:8000`).
+- The **client** serves the SPA. In production the ingress sends `/api` straight
+  to the server (the diagram omits it); with docker compose the client's nginx
+  proxies `/api/` instead (`API_UPSTREAM`, default `http://server:8000`).
 - The **server** is stateless: the SPA keeps all state (validated sprint
   summary, simulation results, Release Plan board) and sends what each
   request needs. Every 422 response is `{errors: [str]}`.
 - **Azure DevOps** is reached only through the server
   (`/api/ado/*`). The Personal Access Token travels with each request and
   is never persisted; `ADO_ALLOWED_HOSTS` limits which hosts may be called.
+- **MCP endpoint** (`POST /api/mcp`): the server also exposes the Release
+  Plan to AI agents as an MCP server (Streamable HTTP, stateless JSON mode, so
+  any replica answers). It calls `app/services` directly, has no
+  authentication, and takes the Azure DevOps PAT as a tool argument. Allowed
+  Host headers come from `MCP_ALLOWED_HOSTS`; board links use
+  `PUBLIC_BASE_URL`. See `specs/mcp_server.md`.
 - A diagram is also available in `docs/architecture.png`.
 
 ### Production workload (Helm)
@@ -72,7 +79,8 @@ in `src/client/src/lib/tools.ts`):
   `public_http_address`.
 - `values.yaml`: registry `dev.criticalmanufacturing.io`, image names, one
   shared `tag` for both images, `adoAllowedHosts` (passed to the server as
-  `ADO_ALLOWED_HOSTS`), `postgres` (database image and the Secret that holds
+  `ADO_ALLOWED_HOSTS`), `adoDescriptionMaxChars` (`ADO_DESCRIPTION_MAX_CHARS`),
+  `postgres` (database image and the Secret that holds
   its credentials).
 
 Both images run as non-root (OpenShift). Releases are built by the manual
@@ -92,6 +100,9 @@ push both images) → git tag.
   - `monte-carlo-app.md` — "Key decisions": simulation/validation business
     rules (ranking, percentiles, the `>50` sprints sentinel, business days).
   - `release-plan-board.md`, `release-plan-import-export.md`, `release-plan-ado.md` — Release Plan features reference.
+  - `release-plan-persistence.md` — storing Release Plan boards in PostgreSQL.
+  - `release-plan-mcp-server.md` — the MCP server: decisions, tool contract,
+    strict board validation rules and the ADO description limit.
 
   When working on a plan, follow its "For Future Agents" section (tick
   checkboxes, update phase status, write the Phase Summary). Create a new
@@ -105,11 +116,12 @@ Python 3.12, FastAPI, pandas/NumPy, httpx.
 | Path | Purpose |
 | --- | --- |
 | `app/main.py` | App factory: mounts routers under `/api` and `/api/ado`, converts validation errors to `{errors}`. |
-| `app/config.py` | Settings from the environment (`ADO_ALLOWED_HOSTS`, `ADO_TIMEOUT_SECONDS`). |
+| `app/config.py` | Settings from the environment (`ADO_ALLOWED_HOSTS`, `ADO_TIMEOUT_SECONDS`, `ADO_DESCRIPTION_MAX_CHARS`, `DB_*`, `MCP_ALLOWED_HOSTS`, `PUBLIC_BASE_URL`). |
 | `app/schemas.py` | Pydantic request/response models — the API contract. |
 | `app/api/routes.py` | Monte Carlo: `GET /health`, `POST /validate`, `POST /simulate`. |
 | `app/api/ado_routes.py` | Azure DevOps proxy: `POST /ado/connect`, `/ado/backlog`, `/ado/sprint-history`. |
-| `app/services/` | All business logic (routes stay thin): `validation` (form guardrails), `data_processing` (Excel parsing, sprint summary), `simulation` + `forecast` (vectorized NumPy Monte Carlo, percentiles, dates, histogram), `ado_*` (ADO client, URL rules, backlog and sprint-history reads). |
+| `app/mcp_server/` | MCP server mounted at `/api/mcp`: `server.py` (server, ASGI app, host/body limits), `plan_tools.py` and `ado_tools.py` (the 6 tools), `resources.py` (`release-plan://schema`), `errors.py`, `deps.py` (test seam). |
+| `app/services/` | All business logic (routes stay thin): `validation` (form guardrails), `data_processing` (Excel parsing, sprint summary), `simulation` + `forecast` (vectorized NumPy Monte Carlo, percentiles, dates, histogram), `ado_*` (ADO client, URL rules, backlog and sprint-history reads), `ado_http` (shared ADO HTTP client for routes and MCP tools), `plan_board` (strict Release Plan board validator and JSON Schema, used by MCP only), `plans` (plan storage). |
 | `tests/` | pytest suite (unit, route, end-to-end incl. performance limits). |
 
 ### Client — `src/client`

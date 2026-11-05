@@ -163,6 +163,24 @@ don't have to be unique.
   warning.
 - If two people edit the same plan, the last save wins.
 
+## Using the Release Plan from an AI agent (MCP)
+
+The server exposes an MCP endpoint
+(Streamable HTTP, stateless) at `https://<host>/api/mcp`, so an AI agent can
+read an Azure DevOps backlog and create or update Release Plans. Example with
+Claude Code:
+
+```bash
+claude mcp add --transport http planning-hub https://<host>/api/mcp
+```
+
+Tools:
+
+- `ado_fetch_backlog` — reads the backlog work items from Azure DevOps
+- `validate_release_plan` — checks a board and returns every error; stores nothing.
+- `create_release_plan`, `update_release_plan` — store a board (update replaces it entirely).
+- `list_release_plans`, `get_release_plan` — browse stored plans.
+
 ## Architecture
 
 ![Architecture Diagram](docs/architecture.png)

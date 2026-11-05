@@ -47,6 +47,10 @@ After the data is imported, the board will be displayed and it must work exactly
 - **Phase 4:** Implement board creation by setting up a connection to Azure DevOps (described above).
 - **Phase 5:** Synchronize data from AzureDevOps (e.g., create missing features, update features status).
 
+## Azure DevOps descriptions
+
+Descriptions of work items fetched from Azure DevOps (board creation and Sync from ADO) are truncated to a configurable number of characters (`ADO_DESCRIPTION_MAX_CHARS`, default 2000; Helm `adoDescriptionMaxChars`). A longer description is cut to the limit (without leaving a half tag or entity) and ends with `…`; shorter ones are unchanged. Boards fetched before the limit existed or changed may show those descriptions as changed on their next Sync from ADO.
+
 ## Common Notes
 
 - Follow React best practices for component structure and state management. Retain only the functionality but organize the components in a modular and maintainable way.
