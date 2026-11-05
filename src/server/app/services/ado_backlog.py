@@ -12,6 +12,8 @@ from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
+from app.config import DEFAULT_ADO_DESCRIPTION_MAX_CHARS
+
 from .ado_client import UNEXPECTED_RESPONSE, AdoClient, AdoError, is_utf8_text
 from .ado_url import AdoProject
 
@@ -43,6 +45,8 @@ CAP_REACHED = f"Only the first {WIQL_TOP} work items were loaded; narrow the sco
 SCOPE_REQUIRED = "Choose an Area path or an Iteration path."
 
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_TAG_START = re.compile(r"[A-Za-z/!?]")
+_PARTIAL_ENTITY = re.compile(r"&(#[0-9]{0,7}|#[xX][0-9a-fA-F]{0,6}|[A-Za-z][A-Za-z0-9]{0,31})?$")
 
 
 def normalize_node_path(path: str) -> str:
@@ -164,7 +168,40 @@ def scope_field_errors(data: Mapping[str, Any]) -> list[str]:
     return []
 
 
-async def fetch_backlog(client: AdoClient, ado_project: AdoProject, scope_type: str, scope_path: str) -> dict:
+def truncate_description(text: str, max_chars: int) -> str:
+    """Limit a work item description (HTML) to `max_chars` characters.
+
+    Text up to the limit is returned unchanged. A longer one is cut to the
+    limit, a trailing incomplete tag or entity is dropped, trailing whitespace
+    is trimmed and `…` is appended, so the result has at most `max_chars + 1`
+    characters (see "Description limit" in plans/release-plan-mcp-server.md).
+    Unclosed tags are left for the sanitizer.
+
+    Only the very end of the cut is inspected. An incomplete tag is a `<`
+    after the last `>` that is the last character or is followed by a letter,
+    `/`, `!` or `?`; a bare `<` in text (`a < b`) is kept. An incomplete entity
+    is an `&` at the end, optionally followed by a partial name or numeric
+    reference (`&am`, `&#12`); a bare `&` in text (`Tom & Jerry`) is kept.
+    """
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    start = cut.rfind("<")
+    if start > cut.rfind(">") and (start == len(cut) - 1 or _TAG_START.match(cut[start + 1])):
+        cut = cut[:start]
+    entity = _PARTIAL_ENTITY.search(cut)
+    if entity:
+        cut = cut[: entity.start()]
+    return cut.rstrip() + "…"
+
+
+async def fetch_backlog(
+    client: AdoClient,
+    ado_project: AdoProject,
+    scope_type: str,
+    scope_path: str,
+    description_max_chars: int = DEFAULT_ADO_DESCRIPTION_MAX_CHARS,
+) -> dict:
     """Fetch the Epics and Features under an Area or Iteration path.
 
     Follows "ADO REST calls used" in plans/release-plan-ado.md: `connect`
@@ -175,6 +212,8 @@ async def fetch_backlog(client: AdoClient, ado_project: AdoProject, scope_type: 
 
     Args:
         scope_type: "area" or "iteration" (validated by the route).
+        description_max_chars: each work item's `description` is cut with
+            `truncate_description`.
 
     Returns:
         The `/api/ado/backlog` payload (see the API contract): work items in
@@ -207,6 +246,8 @@ async def fetch_backlog(client: AdoClient, ado_project: AdoProject, scope_type: 
         if item["type"] in BACKLOG_TYPES:
             items.setdefault(item["id"], item)
     await _complete_parents(client, project_segment, items, fields, size_fields)
+    for item in items.values():
+        item["description"] = truncate_description(item["description"], description_max_chars)
 
     return {
         "project": connection["project"],

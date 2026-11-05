@@ -4,10 +4,12 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import asyncpg
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
@@ -17,6 +19,10 @@ logger = logging.getLogger(__name__)
 SERVER_ROOT = Path(__file__).resolve().parents[1]
 ALEMBIC_INI = SERVER_ROOT / "alembic.ini"
 RETRY_DELAY_SECONDS = 1.0
+
+DB_UNAVAILABLE = "The release plan database is unavailable."
+# Connection failures (session acquisition or a query): REST maps them to 503, MCP tools to a ToolError.
+DB_ERRORS = (OperationalError, InterfaceError, OSError, asyncpg.PostgresConnectionError)
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None

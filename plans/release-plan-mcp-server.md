@@ -252,16 +252,16 @@ Reference: `normalizePlan` in `src/client/src/lib/releasePlan/validate.ts` and
   `mcp` SDK.
 
 ## Phase 1: Strict board validator
-Status: Not started
+Status: Complete
 
 Pure logic with no MCP dependency, so it can be tested in isolation.
 
-- [ ] Create `src/server/app/services/plan_board.py` with the pydantic board models (`extra="forbid"`, strict types) matching `types.ts`.
-- [ ] Port `MS_COLORS`, `SCHEMA` (reuse `PLAN_STATE_SCHEMA`), `VERSION`, `DEFAULT_MILESTONE_NAME`, `ADO_SYSTEM`, `NO_EPIC_ID` and `NO_EPIC_TITLE`, with a comment pointing to the client constants they mirror.
-- [ ] Add `validate_board(state, allowed_hosts) -> BoardResult` (normalized board or `errors: list[str]`) implementing every row of **Validation rules**, including the all-errors-at-once behavior.
-- [ ] Add `board_json_schema()` returning the JSON Schema generated from the models.
-- [ ] Unit tests in `src/server/tests/test_plan_board.py`: one case per **Validation rules** row, plus duplicates across Epics, `123` vs `"123"`, booleans as ids, several errors in one call, cross-reference checks alongside structural errors, and the size and NUL limits.
-- [ ] Unit test: a board shaped like `planFromBacklog` output (one `MVP` milestone, the `no-epic` Epic last) passes `validate_board` unchanged.
+- [x] Create `src/server/app/services/plan_board.py` with the pydantic board models (`extra="forbid"`, strict types) matching `types.ts`.
+- [x] Port `MS_COLORS`, `SCHEMA` (reuse `PLAN_STATE_SCHEMA`), `VERSION`, `DEFAULT_MILESTONE_NAME`, `ADO_SYSTEM`, `NO_EPIC_ID` and `NO_EPIC_TITLE`, with a comment pointing to the client constants they mirror.
+- [x] Add `validate_board(state, allowed_hosts) -> BoardResult` (normalized board or `errors: list[str]`) implementing every row of **Validation rules**, including the all-errors-at-once behavior.
+- [x] Add `board_json_schema()` returning the JSON Schema generated from the models.
+- [x] Unit tests in `src/server/tests/test_plan_board.py`: one case per **Validation rules** row, plus duplicates across Epics, `123` vs `"123"`, booleans as ids, several errors in one call, cross-reference checks alongside structural errors, and the size and NUL limits.
+- [x] Unit test: a board shaped like `planFromBacklog` output (one `MVP` milestone, the `no-epic` Epic last) passes `validate_board` unchanged.
 
 ### Verification Plan
 - `python3 -m compileall -q src/server/app` exits 0.
@@ -269,24 +269,40 @@ Pure logic with no MCP dependency, so it can be tested in isolation.
 - `python3 -m pytest src/server -q` shows no new failures against the baseline.
 - `git diff --stat` shows no changes to `app/api/plan_routes.py` or `plan_field_errors` behavior, so REST validation stays shallow.
 
+**Result (2026-11-05):** all pass. Baseline 831 passed / 41 skipped → 940 passed / 41 skipped (106 unit + 3 QA integration tests). Only new files; `plan_routes.py` and `plans.py` untouched. Run on Python 3.10 only (3.12 has no server deps here).
+
 ### Phase Summary
-_(write when phase completes)_
+**Done.** `src/server/app/services/plan_board.py` (new) holds the pydantic board models, the ported constants, `validate_board(state, allowed_hosts) -> BoardResult` (`.board`, `.errors`, `.valid`) and `board_json_schema()`. Tests: `tests/test_plan_board.py` (106 unit, backend-developer) and `tests/test_plan_board_integration.py` (3, QA: UI-saved Releases/Sprints boards pass unchanged, input not mutated, REST `plan_field_errors` stays shallow for boards the strict validator rejects). One Develop ↔ QA cycle, verdict PASS.
+
+**Key decisions:**
+- pydantic checks structure and generates the schema; each field has a `BeforeValidator` so errors read `path: problem` (e.g. `epics[0].features[2].milestoneId: …`). Cross-reference checks (duplicate ids as text, unknown milestones, flags in releases mode, `projectUrl` via `parse_project_url`) run on the raw input with type guards, so they work alongside structural errors. Errors are de-duplicated.
+- `_state_error` (5 MiB, NUL, `schema`) runs first and its message is returned as-is (no path).
+- Missing/blank `name` → `DEFAULT_PLAN_NAME` ("Feature Release Plan"), as `normalizePlan`; MCP tools overwrite it anyway. Explicit `null` on optional keys (`savedAt`, `scope`, `fetchedAt`, `color`) is an error; absent keys stay absent.
+- `size` trimmed with the JS whitespace set (NBSP, BOM) then upper-cased. `version: true` rejected. Blank flag id/name filled (`fl_<7 base36>` / `Milestone`); given flag ids must be unique.
+- Source keys are emitted in `planFromBacklog` order. `board_json_schema()` is self-contained (only internal `#/$defs` refs); date patterns and `minLength` are hints only, Python enforces the real rules.
+- QA verified empirically (throwaway Vitest, not committed) that `normalizePlan(board)` deep-equals `validate_board` output for Releases/Sprints boards, defaulted colors and flags, and NBSP/BOM/Unicode sizes.
+
+**Refactor (2026-11-05, user-approved "Option A"):** the hand-written `_normalized` / `_epic` were removed. Normalization now lives in the models (`size` / flag / `name` `AfterValidator`s, a `Board` `model_validator` for default colors, `Field(exclude_if=…)` for the optional keys), and the result is `board.model_dump(by_alias=True)`. Behavior, error messages and `board_json_schema()` are unchanged (all 109 tests unchanged and passing; QA re-ran the `normalizePlan` round trip). `src/server/requirements.txt` gained `pydantic>=2.12`, which `exclude_if` needs and `mcp` 2.3 requires anyway. Only `plan_board.py` imports these models. REST and the client are untouched (client: `tsc -b` clean, 890 Vitest passed).
+
+**For Phase 3:** the schema can't express uniqueness / cross-references / allowlist, so if the SDK validates `state` against it before the tool runs, make sure the agent still gets `validate_board`'s full error list.
+
+**Outstanding minor findings (non-blocking):** the generic "Plan state is not a release plan." for a wrong `schema` could hint the expected value (kept per plan); `Milestone.color` is a `Literal` defaulting to `None` (`type: ignore`).
 
 ## Phase 2: MCP endpoint, settings, description limit and infra
-Status: Not started
+Status: Complete
 
-- [ ] Add `mcp>=2.3,<3` to `src/server/requirements.txt` and install it. Confirm no dependency conflict with the current `fastapi`, `starlette` and `pydantic`.
-- [ ] Add settings to `app/config.py`: `mcp_allowed_hosts` (`MCP_ALLOWED_HOSTS`, comma-separated, default `localhost,localhost:*,127.0.0.1,127.0.0.1:*`), `public_base_url` (`PUBLIC_BASE_URL`, default empty, trailing `/` trimmed) and `ado_description_max_chars` (`ADO_DESCRIPTION_MAX_CHARS`, see **Description limit**).
-- [ ] Implement **Description limit**: a pure `truncate_description(text, max_chars)` helper in `app/services/ado_backlog.py`, applied by `fetch_backlog` to every work item through a new `description_max_chars` argument. `POST /api/ado/backlog` passes the setting; `AdoBacklogResponse` is unchanged.
-- [ ] Create `src/server/app/mcp_server/server.py`: the `MCPServer` with `instructions`, and a factory for the ASGI app using `stateless_http=True`, `json_response=True`, `streamable_http_path="/api/mcp"`, `max_request_body_size=6 MiB` and `TransportSecuritySettings` from the settings. Derive `allowed_origins` from the hosts as `http://` and `https://` forms.
-- [ ] Wire it into `app/main.py`: serve exactly `/api/mcp` with no redirect, and run the session manager inside `lifespan`, building a fresh ASGI app per run (see **Technical notes**).
-- [ ] Move `DB_ERRORS` and `DB_UNAVAILABLE` from `app/api/plan_routes.py` to `app/db.py` and import them back, with no behavior change.
-- [ ] Extract from `app/api/ado_routes.py` an `ado_http_client(settings)` async context manager and the `_ado_client` helper into `app/services/`, so tools share them. Routes keep their behavior and their `get_ado_http_client` override.
-- [ ] Add one test seam in `app/mcp_server/` for the DB session factory and the ADO HTTP client.
-- [ ] `docker-compose.yml`: on `server`, set `MCP_ALLOWED_HOSTS` to include `localhost`, `127.0.0.1`, `172.17.0.1` and `server`, `PUBLIC_BASE_URL: http://localhost:8080` and `ADO_DESCRIPTION_MAX_CHARS: "2000"`.
-- [ ] `helm/chart`: in the server deployment, set `MCP_ALLOWED_HOSTS` to `{{ .Values.public_http_address }}`, `PUBLIC_BASE_URL` to `https://{{ .Values.public_http_address }}` and `ADO_DESCRIPTION_MAX_CHARS` to `{{ .Values.adoDescriptionMaxChars | quote }}`; add `adoDescriptionMaxChars: 2000` to `values.yaml`.
-- [ ] Unit tests: settings parsing (including `ADO_DESCRIPTION_MAX_CHARS` default, valid, blank, non-integer, `0` and negative); a test MCP app accepts allowed hosts and answers 421 for others; a body over 4 MiB and under 6 MiB is accepted; `with TestClient(app)` works twice in a row; `POST /api/mcp` doesn't redirect.
-- [ ] Unit tests for `truncate_description`: at, below and above the limit; a cut inside a tag and inside an entity; trailing whitespace before `…`; empty text; non-ASCII text. Plus a `POST /api/ado/backlog` route test where a long description comes back truncated with a small limit override.
+- [x] Add `mcp>=2.3,<3` to `src/server/requirements.txt` and install it. Confirm no dependency conflict with the current `fastapi`, `starlette` and `pydantic`.
+- [x] Add settings to `app/config.py`: `mcp_allowed_hosts` (`MCP_ALLOWED_HOSTS`, comma-separated, default `localhost,localhost:*,127.0.0.1,127.0.0.1:*`), `public_base_url` (`PUBLIC_BASE_URL`, default empty, trailing `/` trimmed) and `ado_description_max_chars` (`ADO_DESCRIPTION_MAX_CHARS`, see **Description limit**).
+- [x] Implement **Description limit**: a pure `truncate_description(text, max_chars)` helper in `app/services/ado_backlog.py`, applied by `fetch_backlog` to every work item through a new `description_max_chars` argument. `POST /api/ado/backlog` passes the setting; `AdoBacklogResponse` is unchanged.
+- [x] Create `src/server/app/mcp_server/server.py`: the `MCPServer` with `instructions`, and a factory for the ASGI app using `stateless_http=True`, `json_response=True`, `streamable_http_path="/api/mcp"`, `max_request_body_size=6 MiB` and `TransportSecuritySettings` from the settings. Derive `allowed_origins` from the hosts as `http://` and `https://` forms.
+- [x] Wire it into `app/main.py`: serve exactly `/api/mcp` with no redirect, and run the session manager inside `lifespan`, building a fresh ASGI app per run (see **Technical notes**).
+- [x] Move `DB_ERRORS` and `DB_UNAVAILABLE` from `app/api/plan_routes.py` to `app/db.py` and import them back, with no behavior change.
+- [x] Extract from `app/api/ado_routes.py` an `ado_http_client(settings)` async context manager and the `_ado_client` helper into `app/services/`, so tools share them. Routes keep their behavior and their `get_ado_http_client` override.
+- [x] Add one test seam in `app/mcp_server/` for the DB session factory and the ADO HTTP client.
+- [x] `docker-compose.yml`: on `server`, set `MCP_ALLOWED_HOSTS` to include `localhost`, `127.0.0.1`, `172.17.0.1` and `server`, `PUBLIC_BASE_URL: http://localhost:8080` and `ADO_DESCRIPTION_MAX_CHARS: "2000"`.
+- [x] `helm/chart`: in the server deployment, set `MCP_ALLOWED_HOSTS` to `{{ .Values.public_http_address }}`, `PUBLIC_BASE_URL` to `https://{{ .Values.public_http_address }}` and `ADO_DESCRIPTION_MAX_CHARS` to `{{ .Values.adoDescriptionMaxChars | quote }}`; add `adoDescriptionMaxChars: 2000` to `values.yaml`.
+- [x] Unit tests: settings parsing (including `ADO_DESCRIPTION_MAX_CHARS` default, valid, blank, non-integer, `0` and negative); a test MCP app accepts allowed hosts and answers 421 for others; a body over 4 MiB and under 6 MiB is accepted; `with TestClient(app)` works twice in a row; `POST /api/mcp` doesn't redirect.
+- [x] Unit tests for `truncate_description`: at, below and above the limit; a cut inside a tag and inside an entity; trailing whitespace before `…`; empty text; non-ASCII text. Plus a `POST /api/ado/backlog` route test where a long description comes back truncated with a small limit override.
 
 ### Verification Plan
 - `python3 -m compileall -q src/server/app` exits 0 and `python3 -m pytest src/server -q` passes.
@@ -297,8 +313,24 @@ Status: Not started
   `docker compose exec server python -c "import urllib.request as u, urllib.error as e; r=u.Request('http://127.0.0.1:8000/api/mcp', data=b'{}', headers={'Host':'evil.example','Content-Type':'application/json','Accept':'application/json, text/event-stream'}); exec('try:\\n print(u.urlopen(r).status)\\nexcept e.HTTPError as x:\\n print(x.code)')"`
 - `docker run --rm -v "$PWD/helm/chart:/chart" alpine/helm template /chart` renders, and the output contains `MCP_ALLOWED_HOSTS`, `PUBLIC_BASE_URL` and `ADO_DESCRIPTION_MAX_CHARS` (`"2000"`).
 
+**Result (2026-11-05):** all pass. Server 940 → 1004 passed / 41 skipped (Python 3.10; 3.12 not available here); `test_lifespan.py` 6 passed. Compose stack: `initialize` through nginx returns `HTTP/1.1 200` JSON with `serverInfo` and `instructions`, no redirect; in-container evil Host returns `421`. `alpine/helm template` renders `MCP_ALLOWED_HOSTS`, `PUBLIC_BASE_URL` (both `| quote`d) and `ADO_DESCRIPTION_MAX_CHARS: "2000"`. No client changes.
+
 ### Phase Summary
-_(write when phase completes)_
+**Done.** Two Develop ↔ QA cycles (cycle 1: one Major in `truncate_description`, fixed; cycle 2: PASS).
+
+**Files:** `requirements.txt` (`mcp>=2.3,<3`, 2.3.0 installed; `pip check` clean for mcp/fastapi/starlette/pydantic); `app/config.py` (`mcp_allowed_hosts`, `public_base_url`, `ado_description_max_chars`); `app/db.py` now owns `DB_ERRORS` / `DB_UNAVAILABLE` (re-imported by `plan_routes.py`); `app/services/ado_http.py` (new: `ado_http_client(settings)` async CM, `ado_client(payload, settings, http)` taking an `AdoConnectRequest`-shaped payload); `app/api/ado_routes.py` uses them and keeps `get_ado_http_client`; `app/services/ado_backlog.py` (`truncate_description`, `fetch_backlog(..., description_max_chars=2000)`; the REST route passes the setting); `app/mcp_server/server.py` (new: `INSTRUCTIONS` placeholder, `transport_security`, `create_mcp_server`, `create_mcp_app`, `MAX_REQUEST_BODY_BYTES` = 6 MiB); `app/mcp_server/deps.py` (new test seam); `app/main.py`; compose and Helm env vars; `values.yaml` `adoDescriptionMaxChars: 2000`.
+
+**Key decisions / what Phase 3 needs:**
+- **Wiring:** each `lifespan` run builds a fresh `MCPServer` and ASGI app in `app.state.mcp_app` and wraps `yield` in `session_manager.run()` (`session_manager` exists only after `streamable_http_app()` is called). `/api/mcp` is an exact Starlette `Route` with an ASGI-callable class endpoint (`McpEndpoint`); a plain function endpoint became GET-only (405). Without lifespan, `/api/mcp` answers 503 `{errors}`. `/api/mcp/` (trailing slash) gets FastAPI's 307; the canonical path has no redirect.
+- **Phase 3 tools register on the server built by `create_mcp_server`**, so they exist in every fresh per-lifespan instance.
+- **Test seam:** tools use `async with deps.db_session() as session:` and `async with deps.ado_http() as http:`; tests use `with deps.override_providers(session=…, ado_client=…):` (zero-arg callables returning async context managers).
+- **Tests over HTTP** need `base_url="http://localhost"`: TestClient's `testserver` host isn't allowed (421). A bad Origin gets 403.
+- **Truncation:** cut to the limit; a trailing `<` with no `>` after it is dropped only when it's the last char or followed by a letter, `/`, `!` or `?` (so `a < b` is kept); then a trailing entity start matching `&(#[0-9]{0,7}|#[xX][0-9a-fA-F]{0,6}|[A-Za-z][A-Za-z0-9]{0,31})?$` is dropped; rstrip; append `…`. QA fuzzed 200k inputs: always ≤ limit + 1, unchanged when ≤ limit. Accepted edge: prose `x<y` cut right after `<y` loses `<y`.
+- Helm env values use `| quote`.
+
+**Tests:** unit (backend-developer): `test_config.py` (settings), `test_mcp_server.py` (security settings, 200/421, 5 MiB accepted / >6 MiB 413, seam), `test_lifespan.py` (lifespan twice, initialize 200 no redirect, 421, 503 without lifespan), `test_ado_backlog_route.py` (`truncate_description` cases, route truncation with small limit). Integration (QA): `test_mcp_endpoint_integration.py` (12: initialize and `tools/list` over HTTP alongside REST routes, 400/405/406, 503, bad Origin 403, `/api/ado/backlog` truncation end to end with the PAT absent, truncation edge cases).
+
+**Outstanding minor findings (non-blocking):** `GET /api/mcp` with `Accept: text/event-stream` opens an idle SSE stream even in stateless JSON mode (SDK behavior; nginx read timeout closes it); `_parse_positive_int` accepts `"1_000"` / `" 5 "` like the existing float parser.
 
 ## Phase 3: Tools, resources and planning guidance
 Status: Not started

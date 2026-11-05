@@ -20,6 +20,9 @@ services:
     image: planninghub/planninghub-server:local
     environment:
       ADO_ALLOWED_HOSTS: dev.azure.com,*.visualstudio.com,tfs-projects.cmf.criticalmanufacturing.com
+      ADO_DESCRIPTION_MAX_CHARS: "2000"
+      MCP_ALLOWED_HOSTS: localhost,localhost:*,127.0.0.1,127.0.0.1:*,172.17.0.1,172.17.0.1:*,server,server:*
+      PUBLIC_BASE_URL: http://localhost:8080
       DB_HOST: postgres
       DB_USER: planninghub
       DB_PASSWORD: planninghub

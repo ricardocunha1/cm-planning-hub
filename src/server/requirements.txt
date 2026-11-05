@@ -1,4 +1,5 @@
 fastapi
+pydantic>=2.12
 uvicorn[standard]
 python-multipart
 pandas
@@ -9,3 +10,4 @@ httpx
 sqlalchemy[asyncio]>=2.0
 asyncpg
 alembic
+mcp>=2.3,<3

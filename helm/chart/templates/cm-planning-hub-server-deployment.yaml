@@ -21,6 +21,12 @@ spec:
           env:
             - name: ADO_ALLOWED_HOSTS
               value: {{ .Values.adoAllowedHosts | quote }}
+            - name: ADO_DESCRIPTION_MAX_CHARS
+              value: {{ .Values.adoDescriptionMaxChars | quote }}
+            - name: MCP_ALLOWED_HOSTS
+              value: {{ .Values.public_http_address | quote }}
+            - name: PUBLIC_BASE_URL
+              value: {{ printf "https://%s" .Values.public_http_address | quote }}
             - name: DB_HOST
               value: cm-planning-hub-db-service
             - name: DB_PORT

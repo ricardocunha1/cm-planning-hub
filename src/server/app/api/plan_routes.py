@@ -1,16 +1,14 @@
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
-import asyncpg
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ValidationError
-from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_session
+from app.db import DB_ERRORS, DB_UNAVAILABLE, get_session
 from app.schemas import (
     ErrorResponse,
     PlanCreateRequest,
@@ -20,9 +18,6 @@ from app.schemas import (
 )
 from app.services import plans
 from app.services.plans import PLAN_PAGE_SIZE, plan_field_errors
-
-DB_UNAVAILABLE = "The release plan database is unavailable."
-DB_ERRORS = (OperationalError, InterfaceError, OSError, asyncpg.PostgresConnectionError)
 
 
 class PlanRoute(APIRoute):

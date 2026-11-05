@@ -900,3 +900,54 @@ def test_fetch_backlog_called_directly():
     assert result["projectUrl"] == f"https://{ONPREM_HOST}/Coll/Fabrikam%20Plant"
     assert [item["id"] for item in result["workItems"]] == [201, 202]
     assert fake.requests_to("wiql")[0].url.raw_path.split(b"?")[0] == b"/Coll/Fabrikam%20Plant/_apis/wit/wiql"
+
+
+# --- description limit ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "limit", "expected"),
+    [
+        ("abcde", 5, "abcde"),  # at the limit
+        ("abc", 5, "abc"),  # below
+        ("abcdef", 5, "abcde…"),  # above
+        ("", 5, ""),
+        ("<p>hello</p>", 5, "<p>he…"),  # a complete tag survives
+        ("ab<p class='x'>text", 8, "ab…"),  # cut inside a tag
+        ("ab<b>cd</b>", 9, "ab<b>cd…"),  # cut inside the closing tag
+        ("fish &amp; chips", 8, "fish…"),  # cut inside an entity, whitespace trimmed
+        ("a&amp;bcdef", 6, "a&amp;…"),  # a complete entity survives
+        ("abc   def", 6, "abc…"),  # trailing whitespace before the ellipsis
+        ("ñandú ñandú", 5, "ñandú…"),  # non-ASCII counts characters
+        ("日本語のテキスト", 3, "日本語…"),
+        ("Tom & Jerry " + "word " * 20, 60, "Tom & Jerry " + "word " * 9 + "wor…"),  # bare &
+        ("a < b and a lot more text", 12, "a < b and a…"),  # bare <
+        ("x <b>y</b> a < b tail", 17, "x <b>y</b> a < b…"),
+        ("<p>ok</p> fish &am", 17, "<p>ok</p> fish…"),  # entity cut at the end
+        ("<p>ok</p> fish &#12;x", 18, "<p>ok</p> fish…"),
+        ("<p>ok</p><a href='x'>link</a>", 14, "<p>ok</p>…"),  # tag cut at the end after a complete one
+        ("abc<", 4, "abc<"),
+        ("abcd<ef", 5, "abcd…"),  # '<' as last char
+    ],
+)
+def test_truncate_description(text, limit, expected):
+    result = ado_backlog.truncate_description(text, limit)
+    assert result == expected
+    assert len(result) <= limit + 1
+
+
+def test_backlog_route_truncates_descriptions_with_the_setting(ado_client, handler):
+    long_description = "<p>" + "x" * 100 + "</p>"
+    fake = FakeAdo(work_items=[work_item(101, "Epic", "Platform", "Team A", description=long_description)])
+    handler["handler"] = fake
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        ado_allowed_hosts=SETTINGS.ado_allowed_hosts, ado_timeout_seconds=5.0, ado_description_max_chars=10
+    )
+    data = _ok(_post(ado_client))
+    assert _items(data)[101]["description"] == "<p>xxxxxxx…"
+
+
+def test_backlog_route_keeps_short_descriptions(ado_client):
+    data = _ok(_post(ado_client))
+    assert _items(data)[101]["description"] == "<p>Platform epic</p>"
+

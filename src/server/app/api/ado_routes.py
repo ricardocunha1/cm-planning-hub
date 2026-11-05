@@ -16,9 +16,10 @@ from app.schemas import (
 )
 from app.services.ado_backlog import connect as ado_connect
 from app.services.ado_backlog import fetch_backlog, scope_field_errors
-from app.services.ado_client import UNEXPECTED_RESPONSE, AdoClient, AdoError
+from app.services.ado_client import UNEXPECTED_RESPONSE, AdoError
+from app.services.ado_http import ado_client, ado_http_client
 from app.services.ado_sprint_history import fetch_sprint_history, iteration_path_errors
-from app.services.ado_url import AdoProject, AdoUrlError, connection_field_errors, parse_project_url
+from app.services.ado_url import AdoUrlError, connection_field_errors
 
 router = APIRouter()
 
@@ -27,14 +28,8 @@ ERROR_RESPONSES = {422: {"model": ErrorResponse}}
 
 async def get_ado_http_client(settings: Settings = Depends(get_settings)) -> AsyncIterator[httpx.AsyncClient]:
     """One httpx client per request, closed when the response is done. Tests
-    override this dependency with a client on an `httpx.MockTransport`.
-
-    TLS certificate verification is disabled: on-prem Azure DevOps Server
-    instances (e.g. tfs-projects.cmf.criticalmanufacturing.com) use
-    certificates signed by an internal CA that isn't in the image's bundle."""
-    async with httpx.AsyncClient(
-        timeout=settings.ado_timeout_seconds, follow_redirects=False, verify=False
-    ) as client:
+    override this dependency with a client on an `httpx.MockTransport`."""
+    async with ado_http_client(settings) as client:
         yield client
 
 
@@ -98,7 +93,7 @@ async def connect(
     payload = AdoConnectRequest.model_validate(data)
 
     try:
-        project, client = _ado_client(payload, settings, http)
+        project, client = ado_client(payload, settings, http)
         return await ado_connect(client, project)
     except (AdoUrlError, AdoError) as exc:
         return _errors([str(exc)])
@@ -131,8 +126,10 @@ async def backlog(
     payload = AdoBacklogRequest.model_validate(data)
 
     try:
-        project, client = _ado_client(payload, settings, http)
-        return await fetch_backlog(client, project, payload.scope_type, payload.scope_path)
+        project, client = ado_client(payload, settings, http)
+        return await fetch_backlog(
+            client, project, payload.scope_type, payload.scope_path, settings.ado_description_max_chars
+        )
     except (AdoUrlError, AdoError) as exc:
         return _errors([str(exc)])
     except (UnicodeError, RecursionError):
@@ -165,21 +162,9 @@ async def sprint_history(
     payload = AdoSprintHistoryRequest.model_validate(data)
 
     try:
-        project, client = _ado_client(payload, settings, http)
+        project, client = ado_client(payload, settings, http)
         return await fetch_sprint_history(client, project, payload.iteration_path)
     except (AdoUrlError, AdoError) as exc:
         return _errors([str(exc)])
     except (UnicodeError, RecursionError):
         return _errors([UNEXPECTED_RESPONSE])
-
-
-def _ado_client(payload: AdoConnectRequest, settings: Settings, http: httpx.AsyncClient) -> tuple[AdoProject, AdoClient]:
-    """Parse the project URL (allowlist included) and build the client.
-
-    Raises:
-        AdoUrlError: for a URL that breaks the rules, before any request.
-        AdoError: PAT_REJECTED for a PAT that can never be valid.
-    """
-    project = parse_project_url(payload.source, payload.project_url, settings.ado_allowed_hosts)
-    client = AdoClient(http, project.base_url, payload.pat.get_secret_value().strip(), settings.ado_timeout_seconds)
-    return project, client

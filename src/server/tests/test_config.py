@@ -1,6 +1,13 @@
 import pytest
 
-from app.config import DB_NAME, DEFAULT_ADO_TIMEOUT_SECONDS, Settings, get_settings, parse_allowed_hosts
+from app.config import (
+    DB_NAME,
+    DEFAULT_ADO_TIMEOUT_SECONDS,
+    Settings,
+    get_settings,
+    parse_allowed_hosts,
+    parse_mcp_allowed_hosts,
+)
 
 ONPREM_HOST = "tfs-projects.cmf.criticalmanufacturing.com"
 
@@ -109,3 +116,46 @@ def test_database_url_hides_password_when_rendered():
 
 def test_settings_repr_does_not_leak_password():
     assert "secret" not in repr(Settings.from_env({"DB_PASSWORD": "secret"}))
+
+
+# --- MCP and description settings -----------------------------------------------------
+
+
+def test_mcp_and_description_defaults():
+    settings = Settings.from_env({})
+    assert settings.mcp_allowed_hosts == ("localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*")
+    assert settings.public_base_url == ""
+    assert settings.ado_description_max_chars == 2000
+
+
+def test_mcp_allowed_hosts_are_trimmed_and_lowercased():
+    settings = Settings.from_env({"MCP_ALLOWED_HOSTS": " Hub.Example.com, ,localhost:*,, "})
+    assert settings.mcp_allowed_hosts == ("hub.example.com", "localhost:*")
+
+
+@pytest.mark.parametrize("raw", ["", "   ", ",,"])
+def test_blank_mcp_allowed_hosts_use_the_default(raw):
+    assert Settings.from_env({"MCP_ALLOWED_HOSTS": raw}).mcp_allowed_hosts == parse_mcp_allowed_hosts(None)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("https://hub.example.com/", "https://hub.example.com"), (" http://x:8080// ", "http://x:8080"), ("", "")],
+)
+def test_public_base_url_trailing_slash_trimmed(raw, expected):
+    assert Settings.from_env({"PUBLIC_BASE_URL": raw}).public_base_url == expected
+
+
+def test_description_max_chars_valid():
+    assert Settings.from_env({"ADO_DESCRIPTION_MAX_CHARS": " 500 "}).ado_description_max_chars == 500
+
+
+@pytest.mark.parametrize("raw", ["", "  ", "abc", "1.5", "0", "-3"])
+def test_invalid_description_max_chars_uses_default(raw):
+    assert Settings.from_env({"ADO_DESCRIPTION_MAX_CHARS": raw}).ado_description_max_chars == 2000
+
+
+@pytest.mark.parametrize("raw", ["abc", "0", "-3"])
+def test_invalid_description_max_chars_logs_warning(raw, caplog):
+    Settings.from_env({"ADO_DESCRIPTION_MAX_CHARS": raw})
+    assert "ADO_DESCRIPTION_MAX_CHARS" in caplog.text

@@ -30,3 +30,39 @@ def test_lifespan_fails_when_database_unreachable(env):
     with pytest.raises(Exception):
         with TestClient(app):
             pass
+
+
+MCP_INITIALIZE = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}},
+}
+MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
+
+
+def test_lifespan_can_run_twice_on_the_same_app(env):
+    env.setenv("DB_MIGRATE_ON_STARTUP", "false")
+    for _ in range(2):
+        with TestClient(app) as client:
+            assert client.get("/api/health").status_code == 200
+
+
+def test_mcp_initialize_answers_200_without_redirect(env):
+    env.setenv("DB_MIGRATE_ON_STARTUP", "false")
+    with TestClient(app, base_url="http://localhost") as client:
+        response = client.post("/api/mcp", json=MCP_INITIALIZE, headers=MCP_HEADERS, follow_redirects=False)
+    assert response.status_code == 200
+    assert response.json()["result"]["serverInfo"]["name"] == "Planning Hub Release Plan"
+    assert "workflow" in response.json()["result"]["instructions"].lower()
+
+
+def test_mcp_refuses_a_host_that_is_not_allowed(env):
+    env.setenv("DB_MIGRATE_ON_STARTUP", "false")
+    with TestClient(app, base_url="http://evil.example") as client:
+        response = client.post("/api/mcp", json=MCP_INITIALIZE, headers=MCP_HEADERS)
+    assert response.status_code == 421
+
+
+def test_mcp_without_lifespan_answers_503():
+    assert TestClient(app).post("/api/mcp", json=MCP_INITIALIZE, headers=MCP_HEADERS).status_code == 503

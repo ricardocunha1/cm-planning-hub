@@ -7,6 +7,7 @@ tag: 0.3.0 # Shared by both images. Update when planninghub-client/-server are r
 public_http_address: cm-planning-hub.apps.rhos.cm-mes.dev
 # Hosts the server may call for Azure DevOps (comma-separated; "*.x" = any subdomain of x)
 adoAllowedHosts: "dev.azure.com,tfs-projects.cmf.criticalmanufacturing.com"
+adoDescriptionMaxChars: 2000
 # PostgreSQL for Release Plan persistence.
 postgres:
   image: postgres:17

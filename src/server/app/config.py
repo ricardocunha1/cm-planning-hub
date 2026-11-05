@@ -15,6 +15,8 @@ DEFAULT_DB_HOST = "localhost"
 DEFAULT_DB_PORT = 5432
 DB_NAME = "planninghub"
 DEFAULT_DB_STARTUP_TIMEOUT_SECONDS = 60.0
+DEFAULT_MCP_ALLOWED_HOSTS = "localhost,localhost:*,127.0.0.1,127.0.0.1:*"
+DEFAULT_ADO_DESCRIPTION_MAX_CHARS = 2000
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,11 @@ class Settings:
     boards (see plans/release-plan-persistence.md). The database name is the
     fixed constant `DB_NAME`, not configurable. The password is kept out of
     `repr` so it never reaches logs.
+
+    The MCP endpoint (see plans/release-plan-mcp-server.md) uses
+    `mcp_allowed_hosts` (Host header allowlist; `host:*` allows any port) and
+    `public_base_url` (no trailing `/`, empty when unset) to build board links.
+    `ado_description_max_chars` caps each backlog work item's description.
     """
 
     ado_allowed_hosts: tuple[str, ...]
@@ -38,6 +45,9 @@ class Settings:
     db_password: str = field(default="", repr=False)
     db_migrate_on_startup: bool = True
     db_startup_timeout_seconds: float = DEFAULT_DB_STARTUP_TIMEOUT_SECONDS
+    mcp_allowed_hosts: tuple[str, ...] = tuple(DEFAULT_MCP_ALLOWED_HOSTS.split(","))
+    public_base_url: str = ""
+    ado_description_max_chars: int = DEFAULT_ADO_DESCRIPTION_MAX_CHARS
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "Settings":
@@ -54,6 +64,13 @@ class Settings:
                 env.get("DB_STARTUP_TIMEOUT_SECONDS"),
                 DEFAULT_DB_STARTUP_TIMEOUT_SECONDS,
                 "DB_STARTUP_TIMEOUT_SECONDS",
+            ),
+            mcp_allowed_hosts=parse_mcp_allowed_hosts(env.get("MCP_ALLOWED_HOSTS")),
+            public_base_url=(env.get("PUBLIC_BASE_URL") or "").strip().rstrip("/"),
+            ado_description_max_chars=_parse_positive_int(
+                env.get("ADO_DESCRIPTION_MAX_CHARS"),
+                DEFAULT_ADO_DESCRIPTION_MAX_CHARS,
+                "ADO_DESCRIPTION_MAX_CHARS",
             ),
         )
 
@@ -78,6 +95,26 @@ def parse_allowed_hosts(raw: str | None) -> tuple[str, ...]:
     if not entries:
         entries = tuple(DEFAULT_ADO_ALLOWED_HOSTS.split(","))
     return entries
+
+
+def parse_mcp_allowed_hosts(raw: str | None) -> tuple[str, ...]:
+    """Split the comma-separated `MCP_ALLOWED_HOSTS` like `parse_allowed_hosts`
+    (a value with no entries means the default list)."""
+    entries = tuple(entry.strip().lower() for entry in (raw or "").split(",") if entry.strip())
+    return entries or tuple(DEFAULT_MCP_ALLOWED_HOSTS.split(","))
+
+
+def _parse_positive_int(raw: str | None, default: int, name: str) -> int:
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value <= 0:
+        logger.warning("Ignoring invalid %s; using %s", name, default)
+        return default
+    return value
 
 
 def _parse_positive_float(raw: str | None, default: float, name: str) -> float:
