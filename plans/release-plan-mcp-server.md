@@ -22,7 +22,7 @@ rules** below verbatim.
 **Area exception (agreed for this plan, as in the persistence plan):**
 `backend-developer` also owns the infra files `docker-compose*.yml` and
 `helm/chart/**`. `qa-engineer` may add one Vitest test under `src/client` for the
-`normalizePlan` round trip and the example mapping check (Phase 4).
+`normalizePlan` round trip (Phase 4).
 
 **Environment:** the repo's `.venv` is broken (its interpreter points at
 `/workspaces/MonteCarloSimulation/.venv`). `python3` (3.10) has the server
@@ -54,13 +54,20 @@ runs on both. Record the baseline with `python3` before starting.
 - **Fetch output** (revised at plan review, 2026-11-05): `ado_fetch_backlog` returns
   exactly what `POST /api/ado/backlog` returns (`AdoBacklogResponse`, camelCase).
   There is **no draft board and no server port of `planFromBacklog`**. The agent
-  builds the board itself, following the **Backlog → board mapping** below, which is
-  published in the guidance resource next to an example board, and summarized in the
-  tool description and server `instructions`. The server keeps only the strict
-  validator as its board logic.
+  builds the board itself from the result and the published JSON Schema. The server
+  keeps only the strict validator as its board logic.
+- **Schema is the only published guidance** (user decision, 2026-11-05): the server
+  publishes the board JSON Schema (resource `release-plan://schema`, also as the
+  `state` input schema) and nothing else: no example board, no guidance text, no
+  prompt, no mapping. The workflow and the backlog → board rules belong to the skill
+  that drives these tools, or to the agent's own reasoning. **Consequence:** the
+  validator enforces structure, not intent, so an agent that doesn't follow
+  `fromBacklog.ts` (for example, orphan Features in a `no-epic` Epic) can store a
+  valid board that looks different from a UI-created one. Field `description`s in the
+  schema carry the semantics that are cheap to state.
 - **Work items are trusted** (user decision, 2026-11-05): the server fetched them, so
-  the board isn't cross-checked against Azure DevOps on create/update. The guidance
-  still tells the agent to keep ids and titles and never invent or drop work items.
+  the board isn't cross-checked against Azure DevOps on create/update. Keeping
+  ids and titles and never inventing or dropping work items is left to the skill.
 - **Description limit** (user decision, 2026-11-05): every backlog fetch, REST and MCP
   alike, truncates each work item's `description` to `ADO_DESCRIPTION_MAX_CHARS`
   (default `2000`), so backlogs and boards stay small enough for an agent's context.
@@ -70,8 +77,7 @@ runs on both. Record the baseline with `python3` before starting.
   autosave can overwrite an agent's update and the reverse. Close the board while
   an agent edits it. This is documented in the tool description and the README.
 - **Building and planning the board is the agent's job**: the server publishes the
-  board schema, the backlog → board mapping, an example board and planning guidance.
-  There is no board-building or allocation logic on the server.
+  board schema only. There is no board-building or allocation logic on the server.
 - **Validation**: a new strict server validator used **by MCP only**. It rejects
   errors, fills optional fields and returns the normalized board. REST keeps its
   shallow check, so UI autosave can't start failing.
@@ -111,8 +117,7 @@ Behavior:
 - **`ado_fetch_backlog`**: reuse `connection_field_errors` + `scope_field_errors`, then
   `parse_project_url` (the `ADO_ALLOWED_HOSTS` allowlist still applies) and
   `fetch_backlog`, and return its `AdoBacklogResponse` dumped `by_alias`, exactly as
-  the REST route does. Its description summarizes the **Backlog → board mapping** and
-  points to the resources.
+  the REST route does.
 
 Tool errors (the message is what the agent reads):
 
@@ -126,43 +131,24 @@ Tool errors (the message is what the agent reads):
 | ADO failure | The existing `AdoError` / `AdoUrlError` text |
 | Anything unexpected | A generic message; the traceback is logged server-side only |
 
-Resources and prompt:
+Resource:
 
 | Kind | Name | Content |
 | --- | --- | --- |
-| Resource | `release-plan://schema` | JSON Schema generated from the board models |
-| Resource | `release-plan://example` | A complete valid board as the **Backlog → board mapping** produces it, then planned: several Epics, the `no-epic` Epic, several milestones, one Feature left Unplanned |
-| Resource | `release-plan://guidance` | The **Backlog → board mapping**, then the planning workflow and rules (Phase 3) |
-| Prompt | `plan_release` | Starts the workflow, taking an optional `goal` argument; embeds the guidance and the example so clients that don't read resources still get them |
+| Resource | `release-plan://schema` | JSON Schema generated from the board models, with a `description` on the fields whose meaning isn't obvious (for example `milestoneId: null` = Unplanned) |
 
-Many MCP clients don't read resources on their own, so spec FR3 must not depend on
-them: also advertise the JSON Schema as the `state` argument's input schema on
-`validate_release_plan`, `create_release_plan` and `update_release_plan`, describe
-the workflow in the server `instructions`, and summarize the mapping in the
-`ado_fetch_backlog` description.
+There is no example resource, guidance resource or prompt (see **Schema is the only
+published guidance**). Many MCP clients don't read resources on their own, so spec FR3
+must not depend on it: also advertise the same JSON Schema as the `state` argument's
+input schema on `validate_release_plan`, `create_release_plan` and `update_release_plan`.
+The server `instructions` stay to a line or two (validate before storing, the schema is
+`release-plan://schema`); the workflow belongs to the skill.
 
-The example board is a static file, `app/mcp_server/example_board.json`, so the server
-and a client test can both read it. It is built from a test-only backlog fixture,
-`src/server/tests/fixtures/mcp_example_backlog.json`, which is not published.
-
-## Backlog → board mapping
-What the agent must do with an `ado_fetch_backlog` result. It mirrors `planFromBacklog`
-and `groupBacklog` in `src/client/src/lib/releasePlan/fromBacklog.ts`; follow it so the
-board looks like a UI-created one and **Sync from ADO** keeps working. Give it
-verbatim in the guidance resource.
-
-| Board field | Value |
-| --- | --- |
-| `schema` / `version` | `release-planner-features` / `1` |
-| `source.system` | `Azure DevOps` |
-| `source.kind`, `projectUrl`, `scopeType`, `scopePath` | The `ado_fetch_backlog` arguments (`source` → `kind`); never the PAT |
-| `source.project` / `scope` / `fetchedAt` | `project.name` / `scope` / `fetchedAt` of the result |
-| `iterations` | The result's `iterations`, `{path, finishDate}` unchanged |
-| `epics` | One per work item with `type` `Epic`, ascending `id`: `{id, title, state, description, features}` |
-| `epics[].features` | The `Feature` items whose `parentId` is that Epic, ascending `id`: `{id, title, state, description, size, iterationPath, milestoneId}`; `size` trimmed and upper-cased |
-| Orphan Features | Features with no `parentId`, or whose parent isn't a returned Epic, go in one last Epic `{id: "no-epic", title: "Features without an Epic", state: "", description: ""}`, only when there are any |
-| Ids | The ADO integer ids, unchanged; never invent, rename or drop work items |
-| `milestones`, `flags`, `mode`, `milestoneId` | The agent's plan (see the guidance); `milestoneId: null` means Unplanned |
+For whoever writes the skill: the UI builds a board from a backlog with `planFromBacklog`
+and `groupBacklog` in `src/client/src/lib/releasePlan/fromBacklog.ts`. A board that
+follows it (one Epic per `Epic` item, Features under their parent, orphan Features in a
+last `no-epic` Epic, ADO ids unchanged, `source` copied from the fetch arguments and
+result, never the PAT) looks like a UI-created one and keeps **Sync from ADO** working.
 
 ## Description limit
 Applies to `fetch_backlog` in `app/services/ado_backlog.py`, so `POST /api/ado/backlog`
@@ -332,44 +318,58 @@ Status: Complete
 
 **Outstanding minor findings (non-blocking):** `GET /api/mcp` with `Accept: text/event-stream` opens an idle SSE stream even in stateless JSON mode (SDK behavior; nginx read timeout closes it); `_parse_positive_int` accepts `"1_000"` / `" 5 "` like the existing float parser.
 
-## Phase 3: Tools, resources and planning guidance
-Status: Not started
+## Phase 3: Tools and schema resource
+Status: Complete
 
-- [ ] Create `app/mcp_server/plan_tools.py` with `list_release_plans`, `get_release_plan`, `validate_release_plan`, `create_release_plan` and `update_release_plan` as in the **Tool contract**, using `plan_board.validate_board`, `plan_field_errors` and the `app/services/plans.py` functions.
-- [ ] Map `DB_ERRORS` to `ToolError(DB_UNAVAILABLE)` and any other exception to a generic `ToolError`, logging the traceback server-side.
-- [ ] Confirm how the UI fills `projectName` (`components/releasePlan/AdoConnectModal.tsx`) so the update project check compares like with like, for example against `source.project`.
-- [ ] Advertise `board_json_schema()` as the `state` input schema on the three tools that take it. If the SDK then rejects bad input before the tool runs, make sure the agent still gets the full error list from **Validation rules**.
-- [ ] Create `app/mcp_server/ado_tools.py` with `ado_fetch_backlog`: wrap `pat` in `SecretStr` on entry, reuse the field checks and services, return the `AdoBacklogResponse` dumped `by_alias` (same JSON as the REST route), map `AdoError` / `AdoUrlError` to `ToolError`, and `UnicodeError` / `RecursionError` to `UNEXPECTED_RESPONSE`.
-- [ ] Keep the PAT out of every log line, error and result. The tool description says it is used for this call only and is never stored.
-- [ ] Write tool descriptions an agent can act on: when to use each tool, that `source` must come from the user, the short **Backlog → board mapping** on `ado_fetch_backlog`, and on update that the board should be closed in the browser (last write wins).
-- [ ] Create `app/mcp_server/example_board.json` and the test fixture `src/server/tests/fixtures/mcp_example_backlog.json` it is built from (see **Resources and prompt**). Test that the fixture parses as `AdoBacklogResponse` and that the example passes `validate_board` unchanged.
-- [ ] Create `app/mcp_server/resources.py` with `release-plan://schema`, `release-plan://example` and `release-plan://guidance`, plus the `plan_release` prompt embedding the guidance and the example.
-- [ ] Write the guidance, starting with the **Backlog → board mapping** verbatim, then the rules taken from `specs/release_plan.md` and `lib/releasePlan/modeSwitch.ts`:
-  - Workflow: ask for `source`, project URL, PAT and Area/Iteration path → `ado_fetch_backlog` → build the board from `workItems` with the mapping, using `release-plan://example` as the model → plan it → `validate_release_plan` (fix and repeat until valid) → `create_release_plan` → give the user `boardUrl`.
-  - Mention the fetch `warnings` to the user.
-  - Ask the user for context: release dates, priorities, capacity.
-  - Choosing `releases` or `sprints` mode, and how Sprints milestones relate to the iteration leaves and their `finishDate`.
-  - Planning rules: keep Feature ids and titles from the backlog and never invent work items; use sizes to balance milestones; place finished Features first; leave uncertain Features in Unplanned (`milestoneId: null`).
-  - Suggest a short-lived, read-only PAT scoped to Work Items, because it passes through the conversation.
-- [ ] Unit tests with the SDK's in-process client (`from mcp import Client`; `Client(server)`): every tool's success and error rows, including `validate_release_plan` not storing anything, derived `projectType` / `projectName`, null `name` on update, project change refused, and an unknown id. DB-backed cases use the `db` marker and fake ADO uses `httpx.MockTransport`.
-- [ ] Unit test: for the same mocked ADO responses, `ado_fetch_backlog` returns the same JSON as `POST /api/ado/backlog`, including a description truncated by **Description limit**.
-- [ ] Unit test: a recognizable fake PAT appears in no result, no `ToolError` and no captured log (`caplog`), on success and on each ADO failure.
+- [x] Create `app/mcp_server/plan_tools.py` with `list_release_plans`, `get_release_plan`, `validate_release_plan`, `create_release_plan` and `update_release_plan` as in the **Tool contract**, using `plan_board.validate_board`, `plan_field_errors` and the `app/services/plans.py` functions.
+- [x] Map `DB_ERRORS` to `ToolError(DB_UNAVAILABLE)` and any other exception to a generic `ToolError`, logging the traceback server-side.
+- [x] Confirm how the UI fills `projectName` (`components/releasePlan/AdoConnectModal.tsx`) so the update project check compares like with like, for example against `source.project`.
+- [x] Advertise `board_json_schema()` as the `state` input schema on the three tools that take it. If the SDK then rejects bad input before the tool runs, make sure the agent still gets the full error list from **Validation rules**.
+- [x] Create `app/mcp_server/ado_tools.py` with `ado_fetch_backlog`: wrap `pat` in `SecretStr` on entry, reuse the field checks and services, return the `AdoBacklogResponse` dumped `by_alias` (same JSON as the REST route), map `AdoError` / `AdoUrlError` to `ToolError`, and `UnicodeError` / `RecursionError` to `UNEXPECTED_RESPONSE`.
+- [x] Keep the PAT out of every log line, error and result. The tool description says it is used for this call only and is never stored.
+- [x] Write tool descriptions an agent can act on: when to use each tool, that `source` must come from the user, and on update that the board should be closed in the browser (last write wins).
+- [x] Create `app/mcp_server/resources.py` with the `release-plan://schema` resource (from `board_json_schema()`). Add field `description`s to the board models where meaning isn't obvious (for example `milestoneId: null` = Unplanned); check the generated schema carries them. No example, guidance resource or prompt.
+- [x] Keep the server `instructions` to a line or two: validate before storing, the schema is `release-plan://schema`.
+- [x] Unit tests with the SDK's in-process client (`from mcp import Client`; `Client(server)`): every tool's success and error rows, including `validate_release_plan` not storing anything, derived `projectType` / `projectName`, null `name` on update, project change refused, and an unknown id. DB-backed cases use the `db` marker and fake ADO uses `httpx.MockTransport`.
+- [x] Unit test: for the same mocked ADO responses, `ado_fetch_backlog` returns the same JSON as `POST /api/ado/backlog`, including a description truncated by **Description limit**.
+- [x] Unit test: a recognizable fake PAT appears in no result, no `ToolError` and no captured log (`caplog`), on success and on each ADO failure.
 
 ### Verification Plan
 - `python3 -m compileall -q src/server/app` exits 0.
 - `python3 -m pytest src/server -q` passes without a database (`db` tests skipped).
 - `docker compose up -d postgres`, then `TEST_DATABASE_URL=postgresql+asyncpg://planninghub:planninghub@172.17.0.1:5432/planninghub python3 -m pytest src/server -q` passes with the `db` tests running.
-- Listing tools through `Client(server)` returns exactly the 6 tools of the contract, with no delete tool and no `ado_connect`.
+- Listing tools through `Client(server)` returns exactly the 6 tools of the contract, with no delete tool and no `ado_connect`; listing resources returns only `release-plan://schema`, and there are no prompts.
+
+**Result (2026-11-05):** all pass. Server 1004 → 1073 passed / 59 skipped without a database; 1131 passed / 1 skipped with `TEST_DATABASE_URL` (Postgres from compose). `compileall` exits 0. Listing tools returns exactly the 6 contract tools, resources only `release-plan://schema`, no prompts (also checked over real HTTP). Python 3.10 only (3.12 not available here). The compose Postgres is still running.
 
 ### Phase Summary
-_(write when phase completes)_
+**Done.** One Develop ↔ QA cycle, QA verdict PASS (no Blocker/Major).
+
+**Files (`src/server`):** `app/mcp_server/plan_tools.py` (5 plan tools, descriptions, `register`, `_advertise_board_schema`), `ado_tools.py` (`ado_fetch_backlog`), `resources.py` (`release-plan://schema`), `errors.py` (`guarded` decorator + `error_text`; not in the original file list), `server.py` (`create_mcp_server` registers tools and resource on every fresh per-lifespan instance; `INSTRUCTIONS` is two sentences), `services/plan_board.py` (only `Field(description=...)` added, no behavior change). Tests: `tests/mcp_helpers.py`, `test_mcp_plan_tools.py` (35), `test_mcp_ado_tool.py` (21), `test_lifespan.py` (one assertion now checks `release-plan://schema` instead of "workflow"); QA integration `test_mcp_tools_integration.py` (31, real HTTP + Postgres).
+
+**Key decisions:**
+- **projectName:** `AdoConnectModal.tsx` stores `backlog.project.name`, the same value as `source.project`. Update compares `source.kind` with the stored `project_type` and `source.project.strip()` with `project_name`.
+- **Schema vs SDK validation:** `state` is typed `Any`, so the SDK never rejects a board itself and every value reaches `validate_board` (full error list). After registration the board JSON Schema replaces `properties.state` on the three board tools, with its `$defs` moved to the root so refs resolve. This uses the private `server._tool_manager.get_tool(...).parameters`.
+- **Errors:** `guarded()` lets `ToolError` through, maps `DB_ERRORS` to `DB_UNAVAILABLE`, and turns anything else into a generic message with the traceback logged. For `ado_fetch_backlog` the log keeps only exception type and frames, never the text.
+- **`ado_fetch_backlog`:** `pat` is a `SecretStr` in the signature; the result goes through `AdoBacklogResponse.model_validate(...).model_dump(by_alias=True, mode="json")`, identical to the REST route (tested, including a truncated description). `source` / `scopeType` are advertised as enums but typed `str`, so bad values get the existing field-error messages.
+- **Create/update:** name checked first (existing `NAME_*` texts), then the board; `state.name` set to the stripped final name. `boardUrl` = `PUBLIC_BASE_URL` + `/release-plan/<id>`, relative when unset. `list_release_plans` with `page < 1` raises `Page must be 1 or greater.`
+- Tool parameters use camelCase names (`planId`, `projectUrl`, ...) to match the contract without aliases.
+
+**Outstanding minor findings (non-blocking):**
+- A non-string `pat` is echoed in the SDK's own validation error before the tool runs (declaring `pat` as `Any` and checking inside would avoid it).
+- A `state` that isn't an object or has a wrong/missing `schema` gets only "Plan state is not a release plan." without the expected value (same as the Phase 1 minor).
+- `_advertise_board_schema` depends on private SDK API (`_tool_manager`); `mcp>=2.3,<3` allows releases that may rename it (consider `<2.4`). A unit test would catch it.
+- `source.project` is stored untrimmed and has no 200-character limit, unlike REST's `PROJECT_NAME_TOO_LONG`.
+- A JSON-string `state` is decoded by the SDK and accepted as an object (lenient, harmless).
+- The SDK logs "Tool X failed: <message>" at INFO, including ADO error text (never the PAT).
+- Not tested: compose/nginx smoke (Phase 4), Python 3.12, real Azure DevOps.
+
 
 ## Phase 4: End-to-end verification and docs
 Status: Not started
 
-- [ ] QA: add `src/server/tests/test_mcp_integration.py`, driving a real HTTP `POST /api/mcp` with Postgres: fake-ADO `ado_fetch_backlog` → the test builds a board from the returned `workItems` by the **Backlog → board mapping** → `create_release_plan` → `GET /api/plan/{id}` returns the same board → `update_release_plan` → `PUT` from the UI side still works.
+- [ ] QA: add `src/server/tests/test_mcp_integration.py`, driving a real HTTP `POST /api/mcp` with Postgres: fake-ADO `ado_fetch_backlog` → the test builds a board from the returned `workItems` the way `planFromBacklog` does → `create_release_plan` → `GET /api/plan/{id}` returns the same board → `update_release_plan` → `PUT` from the UI side still works.
 - [ ] QA: add a fixture `src/server/tests/fixtures/mcp_board_normalized.json`, generated by `validate_board` with both modes, flags and the `no-epic` Epic. Add a Vitest test asserting `normalizePlan(fixture)` deep-equals the fixture.
-- [ ] QA: in the same Vitest file, check the published mapping matches the client: `planFromBacklog(tests/fixtures/mcp_example_backlog.json)` equals `app/mcp_server/example_board.json` in everything but the plan itself (same `source`, `iterations`, Epic and Feature ids, order and fields; `milestones`, `flags`, `mode`, `name` and `milestoneId` are ignored).
 - [ ] QA: check a board as the UI saves it (`planFromBacklog` output, and a Sprints-mode board with flags) passes `validate_board`, so agents can update UI-created plans.
 - [ ] QA: check `planConnection(state.source)` is non-null for an MCP-created board, so Sync from ADO works.
 - [ ] Update `specs/mcp_server.md` with the tools, the ADO link requirement and the accepted limitations.
@@ -380,7 +380,7 @@ Status: Not started
 ### Verification Plan
 - All of these pass: `python3 -m compileall -q src/server/app`, `python3 -m pytest src/server -q` (with `TEST_DATABASE_URL` set), and `cd src/client && npm run build && npm test -- --run`.
 - `git diff --stat -- src/client` shows only the new test file; no production client code changed.
-- With the compose stack running, an MCP client created by `Client("http://172.17.0.1:8080/api/mcp")` lists the 6 tools, creates a board from the example resource, and the returned `boardUrl` path answers through `GET /api/plan/<id>`.
+- With the compose stack running, an MCP client created by `Client("http://172.17.0.1:8080/api/mcp")` lists the 6 tools, creates a board built from a fetched backlog, and the returned `boardUrl` path answers through `GET /api/plan/<id>`.
 
 ### Phase Summary
 _(write when phase completes)_

@@ -9,21 +9,18 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
 from app.config import Settings
+from app.mcp_server import ado_tools, plan_tools, resources
 
 MCP_PATH = "/api/mcp"
 # Above PLAN_STATE_MAX_BYTES (5 MiB) so a valid large board reaches the tool;
 # the SDK default of 4 MiB would refuse it first.
 MAX_REQUEST_BODY_BYTES = 6 * 1024 * 1024
 
-INSTRUCTIONS = """\
-Planning Hub Release Plan tools: build a Release Plan board from an Azure DevOps backlog and store it.
-
-Workflow:
-1. Read the backlog with ado_fetch_backlog.
-2. Build the board from the returned work items (Epics with their Features). Keep the ids and titles; never invent or drop work items.
-3. Check it with validate_release_plan and fix the errors until it is valid.
-4. Store it with create_release_plan (or update_release_plan for an existing plan) and return the boardUrl.
-"""
+INSTRUCTIONS = (
+    "Build and store Release Plan boards from an Azure DevOps backlog. "
+    "Always check a board with validate_release_plan before storing it; "
+    "the board JSON Schema is the resource release-plan://schema."
+)
 
 
 def transport_security(settings: Settings) -> TransportSecuritySettings:
@@ -38,8 +35,12 @@ def transport_security(settings: Settings) -> TransportSecuritySettings:
 
 
 def create_mcp_server() -> MCPServer:
-    """A new server instance with the tools, resources and prompt registered."""
-    return MCPServer("Planning Hub Release Plan", instructions=INSTRUCTIONS)
+    """A new server instance with the tools and the schema resource registered."""
+    server = MCPServer("Planning Hub Release Plan", instructions=INSTRUCTIONS)
+    plan_tools.register(server)
+    ado_tools.register(server)
+    resources.register(server)
+    return server
 
 
 def create_mcp_app(settings: Settings, server: MCPServer | None = None) -> Starlette:

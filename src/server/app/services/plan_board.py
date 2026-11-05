@@ -134,61 +134,70 @@ class _Strict(BaseModel):
 class Milestone(_Strict):
     """A board row (release or sprint)."""
 
-    id: NonBlank
-    name: NonBlank
-    date: CalendarDate = ""
+    id: Annotated[NonBlank, Field(description="Unique id referenced by Feature `milestoneId` and flag `afterMsId`.")]
+    name: Annotated[NonBlank, Field(description="Display name, e.g. `MVP` or `Sprint 12`.")]
+    date: Annotated[CalendarDate, Field(description="Target date as YYYY-MM-DD, or empty for no date.")] = ""
     color: Literal[MS_COLORS] = Field(  # type: ignore[valid-type]
-        default=None, json_schema_extra=_no_schema_default
+        default=None,
+        json_schema_extra=_no_schema_default,
+        description="Row color; when omitted one of the palette colors is assigned by position.",
     )  # when missing: MS_COLORS[index % 8]
 
 
 class Flag(_Strict):
     """A milestone flag placed after a milestone; Sprints mode only."""
 
-    id: Annotated[Text, AfterValidator(_flag_id)] = Field(default="", validate_default=True)  # blank: `fl_<random>`
-    name: Annotated[Text, AfterValidator(_flag_name)] = Field(default="", validate_default=True)
-    date: CalendarDate = ""
-    afterMsId: NonBlank
+    id: Annotated[Text, AfterValidator(_flag_id)] = Field(
+        default="", validate_default=True, description="Unique id; a random one is assigned when empty."
+    )  # blank: `fl_<random>`
+    name: Annotated[Text, AfterValidator(_flag_name)] = Field(
+        default="", validate_default=True, description="Display name; `Milestone` when empty."
+    )
+    date: Annotated[CalendarDate, Field(description="Date as YYYY-MM-DD, or empty for no date.")] = ""
+    afterMsId: Annotated[NonBlank, Field(description="Id of the milestone the flag is placed after.")]
 
 
 class Feature(_Strict):
     """An Azure DevOps Feature; `milestoneId: null` means Unplanned."""
 
-    id: WorkItemId
-    title: NonBlank
-    state: Text = ""
-    description: Text = ""
-    size: Annotated[Text, AfterValidator(_size)] = ""  # stored trimmed and upper-cased
-    iterationPath: Text = ""
-    milestoneId: str | None = None
+    id: Annotated[WorkItemId, Field(description="Azure DevOps work item id; unique across all Epics.")]
+    title: Annotated[NonBlank, Field(description="Work item title, as in Azure DevOps.")]
+    state: Annotated[Text, Field(description="Work item state, e.g. `New` or `Active`.")] = ""
+    description: Annotated[Text, Field(description="Work item description (HTML), as fetched.")] = ""
+    size: Annotated[Text, AfterValidator(_size), Field(description="T-shirt size such as S, M or L; stored upper-cased.")] = ""
+    iterationPath: Annotated[Text, Field(description="Azure DevOps iteration path of the work item.")] = ""
+    milestoneId: str | None = Field(
+        default=None,
+        description="Id of the milestone the Feature is planned in; null means Unplanned.",
+    )
 
 
 class Epic(_Strict):
     """An Azure DevOps Epic with its Features (board columns, left to right)."""
 
-    id: WorkItemId
-    title: NonBlank
-    state: Text = ""
-    description: Text = ""
-    features: list[Feature] = Field(default_factory=list)
+    id: Annotated[WorkItemId, Field(description="Azure DevOps work item id; unique among Epics.")]
+    title: Annotated[NonBlank, Field(description="Work item title, as in Azure DevOps.")]
+    state: Annotated[Text, Field(description="Work item state, e.g. `New` or `Active`.")] = ""
+    description: Annotated[Text, Field(description="Work item description (HTML), as fetched.")] = ""
+    features: list[Feature] = Field(default_factory=list, description="The Epic's Features, in display order.")
 
 
 class Iteration(_Strict):
-    path: Text
-    finishDate: CalendarDate = ""
+    path: Annotated[Text, Field(description="Azure DevOps iteration path.")]
+    finishDate: Annotated[CalendarDate, Field(description="Finish date as YYYY-MM-DD, or empty if undated.")] = ""
 
 
 class Source(_Strict):
     """The Azure DevOps connection (never the PAT); required, so Sync works."""
 
     system: str = ADO_SYSTEM
-    project: NonBlank
+    project: Annotated[NonBlank, Field(description="Azure DevOps project name, as returned by ado_fetch_backlog.")]
     scope: str = _absent_by_default()
     fetchedAt: str = _absent_by_default()
-    kind: Literal["onprem", "cloud"]
-    projectUrl: NonBlank
-    scopeType: Literal["area", "iteration"]
-    scopePath: NonBlank
+    kind: Annotated[Literal["onprem", "cloud"], Field(description="The `source` given to ado_fetch_backlog.")]
+    projectUrl: Annotated[NonBlank, Field(description="The project URL given to ado_fetch_backlog.")]
+    scopeType: Annotated[Literal["area", "iteration"], Field(description="`area` or `iteration`, as fetched.")]
+    scopePath: Annotated[NonBlank, Field(description="The Area or Iteration path given to ado_fetch_backlog.")]
 
 
 class Board(_Strict):
@@ -196,14 +205,16 @@ class Board(_Strict):
 
     schema_: Literal["release-planner-features"] = Field(alias="schema")
     version: Annotated[Literal[1], BeforeValidator(_version)] = VERSION
-    mode: Literal["releases", "sprints"] = "releases"
+    mode: Literal["releases", "sprints"] = Field(
+        default="releases", description="`releases`: milestones are releases; `sprints`: sprints, and flags are allowed."
+    )
     name: Annotated[Text, AfterValidator(_plan_name)] = DEFAULT_PLAN_NAME
     savedAt: str = _absent_by_default()
     source: Source
     iterations: list[Iteration] = Field(default_factory=list)
-    milestones: list[Milestone]
-    flags: list[Flag] = Field(default_factory=list)
-    epics: list[Epic]
+    milestones: list[Milestone] = Field(description="Board rows in order; may be empty.")
+    flags: list[Flag] = Field(default_factory=list, description="Only in `sprints` mode.")
+    epics: list[Epic] = Field(description="Board columns, left to right.")
 
     @model_validator(mode="after")
     def _fill_milestone_colors(self) -> "Board":
