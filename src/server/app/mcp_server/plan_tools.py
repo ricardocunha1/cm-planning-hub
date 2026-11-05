@@ -105,7 +105,7 @@ async def list_release_plans(page: int = 1) -> dict[str, Any]:
     async with deps.db_session() as session:
         items, total = await plans.list_plans(session, page)
     return {
-        "items": [PlanSummary.model_validate(item).model_dump(by_alias=True, mode="json") for item in items],
+        "items": [PlanSummary.model_validate(item).model_dump(by_alias=True, mode="json", exclude={"id"}) for item in items],
         "total": total,
         "page": page,
         "pageSize": PLAN_PAGE_SIZE,
@@ -118,7 +118,7 @@ async def get_release_plan(planId: int) -> dict[str, Any]:
         plan = await plans.get_plan(session, planId)
     if plan is None:
         raise _not_found(planId)
-    return {**plan.model_dump(by_alias=True, mode="json"), "boardUrl": _board_url(plan.id)}
+    return {**plan.model_dump(by_alias=True, mode="json", exclude={"id"}), "boardUrl": _board_url(plan.id)}
 
 
 @guarded()
