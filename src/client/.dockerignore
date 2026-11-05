@@ -3,3 +3,6 @@ dist
 *.tsbuildinfo
 Dockerfile
 .dockerignore
+# Tests are not needed in the image (and some import files outside the build context)
+src/**/*.test.ts
+src/**/*.test.tsx
