@@ -79,8 +79,10 @@ runs on both. Record the baseline with `python3` before starting.
 - **Building and planning the board is the agent's job**: the server publishes the
   board schema only. There is no board-building or allocation logic on the server.
 - **Validation**: a new strict server validator used **by MCP only**. It rejects
-  errors, fills optional fields and returns the normalized board. REST keeps its
-  shallow check, so UI autosave can't start failing.
+  errors and fills optional fields. `validate_board` returns the normalized board and
+  create/update store it, while the `validate_release_plan` tool only reports
+  `{valid: true}` or the errors. REST keeps its shallow check, so UI autosave can't
+  start failing.
 - **ADO link required**: every board stored through MCP must carry the `source`
   connection, so Sync from ADO always works.
 - **`projectType` / `projectName` are derived** from `state.source.kind` and
@@ -99,9 +101,9 @@ the REST API.
 
 | Tool | Arguments | Result |
 | --- | --- | --- |
-| `list_release_plans` | `page: int = 1` | `{items: [PlanSummary], total, page, pageSize}` |
-| `get_release_plan` | `planId: int` | `PlanDetail` plus `boardUrl` |
-| `validate_release_plan` | `state: object` | `{valid: true, state}` or `{valid: false, errors: [str]}`. Stores nothing and does not raise for an invalid board. |
+| `list_release_plans` | `page: int = 1` | `{items: [PlanSummary + boardUrl], total, page, pageSize}` (no board). `id` is an internal handle used only as `planId`; the agent must not show it to the user, only the name, project and `boardUrl`. |
+| `get_release_plan` | `planId: int` | `PlanDetail` (incl. `id`, an internal handle the agent must not show) plus `boardUrl` |
+| `validate_release_plan` | `state: object` | `{valid: true}` (the board is not echoed; create/update normalize it themselves) or `{valid: false, errors: [str]}`. Stores nothing and does not raise for an invalid board. |
 | `create_release_plan` | `name: str`, `state: object` | `PlanSummary` plus `boardUrl` |
 | `update_release_plan` | `planId: int`, `state: object`, `name: str \| null = null` | `PlanSummary` plus `boardUrl` |
 | `ado_fetch_backlog` | `source`, `projectUrl`, `pat`, `scopeType`, `scopePath` | `AdoBacklogResponse`, identical to `POST /api/ado/backlog`: `{project: {id, name}, projectUrl, scope, fetchedAt, workItems, iterations, warnings}` |

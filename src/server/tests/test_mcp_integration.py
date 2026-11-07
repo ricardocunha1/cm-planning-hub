@@ -102,7 +102,7 @@ def test_agent_flow_fetch_build_create_get_update_and_ui_put(stack, fixed_clock)
 
     # the agent validates, then stores
     check = stack.ok("validate_release_plan", {"state": built})
-    assert check == {"valid": True, "state": built}
+    assert check == {"valid": True}
     created = stack.ok("create_release_plan", {"name": built["name"], "state": built})
     plan_id = created["id"]
     assert created["projectType"] == "cloud" and created["projectName"] == backlog["project"]["name"]
@@ -167,9 +167,27 @@ def test_ui_saved_sprints_board_with_flags_can_be_updated_by_an_agent(stack, fix
     plan_id = created.json()["id"]
     got = stack.ok("get_release_plan", {"planId": plan_id})["state"]
     assert got == board
-    assert stack.ok("validate_release_plan", {"state": got}) == {"valid": True, "state": board}
+    assert stack.ok("validate_release_plan", {"state": got}) == {"valid": True}
+    assert validate_board(got, ("dev.azure.com",)).board == board
     stack.ok("update_release_plan", {"planId": plan_id, "state": got})
     assert stack.client.get(f"/api/plan/{plan_id}").json()["state"] == board
+
+
+@pytest.mark.db
+def test_validate_then_create_with_the_same_raw_board_stores_the_normalized_board(stack):
+    raw = {
+        "schema": "release-planner-features",
+        "source": {"project": "Proj", "kind": "cloud", "projectUrl": "https://dev.azure.com/org/Proj",
+                   "scopeType": "area", "scopePath": "Proj\\Team"},
+        "milestones": [{"id": "ms_a", "name": "MVP"}],
+        "epics": [{"id": 1, "title": "Epic", "features": [{"id": 10, "title": "F", "milestoneId": "ms_a"}]}],
+    }
+    assert stack.ok("validate_release_plan", {"state": copy.deepcopy(raw)}) == {"valid": True}
+    expected = validate_board(copy.deepcopy(raw), HOSTS).board
+    assert expected != raw and expected["milestones"][0]["color"].startswith("#")
+    created = stack.ok("create_release_plan", {"name": "Raw", "state": copy.deepcopy(raw)})
+    stored = stack.client.get(f"/api/plan/{created['id']}").json()["state"]
+    assert stored == {**expected, "name": "Raw"}
 
 
 def test_normalized_board_fixture_is_a_fixed_point_of_validate_board():

@@ -3,6 +3,7 @@ client. Cases that touch the database carry the `db` marker."""
 
 import copy
 import logging
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -10,6 +11,7 @@ import pytest
 
 from app.config import Settings
 from app.db import DB_UNAVAILABLE
+from app.schemas import PlanDetail, PlanSummary
 from app.mcp_server import ado_tools, deps, plan_tools
 from app.mcp_server.errors import UNEXPECTED_ERROR
 from app.services.plan_board import board_json_schema
@@ -106,7 +108,7 @@ def test_a_fresh_server_has_the_tools_each_time():
 # --- validate_release_plan --------------------------------------------------------
 
 
-def test_validate_returns_the_normalized_board_and_stores_nothing():
+def test_validate_returns_only_valid_true_and_stores_nothing():
     @asynccontextmanager
     async def no_database():
         raise AssertionError("validate must not touch the database")
@@ -114,9 +116,7 @@ def test_validate_returns_the_normalized_board_and_stores_nothing():
 
     with deps.override_providers(session=no_database):
         result = ok("validate_release_plan", {"state": board()})
-    assert result["valid"] is True
-    assert result["state"]["mode"] == "releases"
-    assert result["state"]["milestones"][0]["color"].startswith("#")
+    assert result == {"valid": True}
 
 
 def test_validate_lists_every_error_without_raising():
@@ -214,6 +214,45 @@ def test_unexpected_errors_are_generic_and_logged(caplog):
     assert record.exc_info and "secret internal detail" in str(record.exc_info[1])
 
 
+# --- result shape (fake session, no database) ------------------------------------
+
+
+@asynccontextmanager
+async def _fake_session():
+    yield object()
+
+
+def _plan_detail(plan_id: int = 7) -> PlanDetail:
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    return PlanDetail(
+        id=plan_id, name="P", projectType="cloud", projectName="Proj", createdAt=now, updatedAt=now, state=board()
+    )
+
+
+def test_list_items_have_id_and_board_url_and_no_board(monkeypatch):
+    async def fake_list(session, page):
+        detail = _plan_detail(7)
+        return [PlanSummary(**detail.model_dump(exclude={"state"}))], 1
+
+    monkeypatch.setattr(plan_tools.plans, "list_plans", fake_list)
+    with deps.override_providers(session=_fake_session):
+        result = ok("list_release_plans", {})
+    item = result["items"][0]
+    assert {"id", "boardUrl"} <= item.keys() and "state" not in item
+    assert item["id"] == 7 and item["boardUrl"].endswith("/release-plan/7")
+
+
+def test_get_has_id_state_and_board_url(monkeypatch):
+    async def fake_get(session, plan_id):
+        return _plan_detail(plan_id)
+
+    monkeypatch.setattr(plan_tools.plans, "get_plan", fake_get)
+    with deps.override_providers(session=_fake_session):
+        result = ok("get_release_plan", {"planId": 7})
+    assert {"id", "state", "boardUrl"} <= result.keys()
+    assert result["id"] == 7 and result["boardUrl"].endswith("/release-plan/7")
+
+
 # --- with the database ---------------------------------------------------------------
 
 
@@ -227,6 +266,7 @@ def test_create_derives_project_sets_name_and_returns_board_url(store):
     assert stored["state"]["name"] == "My plan"
     assert stored["state"]["milestones"][0]["color"].startswith("#")
     assert stored["boardUrl"] == summary["boardUrl"]
+    assert stored["id"] == summary["id"]
 
 
 @pytest.mark.db
@@ -250,6 +290,8 @@ def test_list_paginates_and_has_no_board(store):
     first = ok("list_release_plans", {})
     assert first["total"] == 11 and first["page"] == 1 and first["pageSize"] == 10
     assert len(first["items"]) == 10 and "state" not in first["items"][0]
+    assert {"id", "boardUrl"} <= first["items"][0].keys()
+    assert first["items"][0]["boardUrl"].endswith(f"/release-plan/{first['items'][0]['id']}")
     assert first["items"][0]["name"] == "P10"
     assert len(ok("list_release_plans", {"page": 2})["items"]) == 1
     assert ok("list_release_plans", {"page": 3})["items"] == []
@@ -296,3 +338,15 @@ def test_update_refuses_a_project_change(store, mutate):
     text = failure("update_release_plan", {"planId": plan_id, "state": changed})
     assert "The plan's project cannot be changed (stored: cloud · Proj)." in text
     assert ok("get_release_plan", {"planId": plan_id})["state"]["source"]["project"] == "Proj"
+
+
+def test_descriptions_tell_the_agent_the_id_is_internal_and_to_give_the_board_url():
+    tools = {tool.name: tool for tool in run_client(lambda c: c.list_tools()).tools}
+    for name in ("list_release_plans", "get_release_plan", "update_release_plan"):
+        description = tools[name].description or ""
+        assert "never show" in description and "`id`" in description, name
+    for name in ("list_release_plans", "get_release_plan"):
+        assert "`boardUrl`" in tools[name].description and "name and project" in tools[name].description
+    assert "planId" in tools["list_release_plans"].description
+    assert "{valid: true}" in tools["validate_release_plan"].description
+    assert "{valid: true, state}" not in tools["validate_release_plan"].description

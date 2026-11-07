@@ -189,7 +189,7 @@ def test_non_object_or_unrecognized_state_is_a_clean_error_on_all_tools(mcp, sta
 
 def test_a_json_string_state_is_decoded_by_the_sdk_and_validated_as_an_object(mcp):
     result = mcp.ok("validate_release_plan", {"state": json.dumps(board())})
-    assert result["valid"] is True and isinstance(result["state"], dict)
+    assert result == {"valid": True}
     bad = mcp.ok("validate_release_plan", {"state": json.dumps(board(milestones="x"))})
     assert bad["valid"] is False and "milestones" in "\n".join(bad["errors"])
 
@@ -269,6 +269,7 @@ def test_create_get_list_update_and_ui_style_put_round_trip(stack):
     listed = stack.ok("list_release_plans", {})
     assert listed["total"] == 1 and listed["page"] == 1 and listed["pageSize"] == 10
     assert listed["items"][0]["id"] == plan_id and "state" not in listed["items"][0]
+    assert listed["items"][0]["boardUrl"] == created["boardUrl"] and via_mcp["id"] == plan_id
 
     # null name keeps the stored name; state.name follows the column
     new_state = copy.deepcopy(detail["state"])

@@ -21,9 +21,9 @@ The MCP server is mounted in the API server at `/api/mcp` (Streamable HTTP, stat
 
 | Tool | Purpose |
 | --- | --- |
-| `list_release_plans` | Paginated list of stored plans. |
-| `get_release_plan` | One plan with its board. |
-| `validate_release_plan` | Validates a board and returns all errors; stores nothing. |
+| `list_release_plans` | Paginated list of stored plans (`id`, name, project, `boardUrl`; no board). The `id` is an internal handle used only as `planId`; agents must not show it to the user. |
+| `get_release_plan` | One plan with its board, `id` and `boardUrl`. |
+| `validate_release_plan` | Validates a board; returns `{valid: true}` or all errors; stores nothing (create and update normalize the board themselves). |
 | `create_release_plan` | Validates and stores a new plan. |
 | `update_release_plan` | Validates and replaces a plan's board (and optionally its name). |
 | `ado_fetch_backlog` | Reads an Azure DevOps backlog, same result as `POST /api/ado/backlog`. |

@@ -24,19 +24,22 @@ PAGE_INVALID = "Page must be 1 or greater."
 
 LIST_DESCRIPTION = (
     "List the stored Release Plans, most recently updated first, "
-    f"{PLAN_PAGE_SIZE} per page. Use it to find a plan's id before get_release_plan "
-    "or update_release_plan. Returns {items, total, page, pageSize}; items carry no board."
+    f"{PLAN_PAGE_SIZE} per page. Returns {{items, total, page, pageSize}}; each item carries the plan's "
+    "`id`, name, project and `boardUrl`, but no board. The `id` is an internal handle used only as "
+    "`planId` for get_release_plan / update_release_plan: never show it to the user. Refer to plans "
+    "by name and project, and give the `boardUrl` when pointing the user to a plan."
 )
 GET_DESCRIPTION = (
-    "Read one stored Release Plan: its name, project and the full board in `state`, plus the "
+    "Read one stored Release Plan: its `id`, name, project and the full board in `state`, plus the "
     "`boardUrl` where a person opens it. Use it before update_release_plan to start from the "
-    "current board."
+    "current board. The `id` is an internal handle (the `planId` of this and update_release_plan): "
+    "never show it to the user; refer to the plan by name and project and give the `boardUrl`."
 )
 VALIDATE_DESCRIPTION = (
     "Check a board against the strict Release Plan format without storing anything. Returns "
-    "{valid: true, state} with the board normalized (defaults filled), or {valid: false, errors} "
-    "listing every problem at once as `<path>: <problem>`. Call it, and fix the errors, before "
-    "create_release_plan or update_release_plan. The format is the `state` input schema, also "
+    "{valid: true} or {valid: false, errors} listing every problem at once as "
+    "`<path>: <problem>`. Fix the errors before create_release_plan or update_release_plan; "
+    "those normalize the board (defaults filled) themselves. The format is the `state` input schema, also "
     f"published as the resource {BOARD_SCHEMA_URI}."
 )
 CREATE_DESCRIPTION = (
@@ -48,7 +51,9 @@ CREATE_DESCRIPTION = (
 )
 UPDATE_DESCRIPTION = (
     "Replace the board of a stored Release Plan (last write wins) and return its summary with the "
-    "`boardUrl`. Read the plan with get_release_plan first and send the whole new board in `state`. "
+    "`boardUrl`. `planId` is the internal `id` from list_release_plans or get_release_plan, never "
+    "shown to the user. Read the plan with get_release_plan first and send the whole new board in "
+    "`state`. "
     "A null `name` keeps the stored name. The plan's project cannot change: `state.source.kind` and "
     "`state.source.project` must match the stored ones. An open board in the browser does not "
     "refresh and its autosave can overwrite this update, so ask the user to close the board in "
@@ -105,7 +110,7 @@ async def list_release_plans(page: int = 1) -> dict[str, Any]:
     async with deps.db_session() as session:
         items, total = await plans.list_plans(session, page)
     return {
-        "items": [PlanSummary.model_validate(item).model_dump(by_alias=True, mode="json", exclude={"id"}) for item in items],
+        "items": [_summary_result(item) for item in items],
         "total": total,
         "page": page,
         "pageSize": PLAN_PAGE_SIZE,
@@ -118,7 +123,7 @@ async def get_release_plan(planId: int) -> dict[str, Any]:
         plan = await plans.get_plan(session, planId)
     if plan is None:
         raise _not_found(planId)
-    return {**plan.model_dump(by_alias=True, mode="json", exclude={"id"}), "boardUrl": _board_url(plan.id)}
+    return {**plan.model_dump(by_alias=True, mode="json"), "boardUrl": _board_url(plan.id)}
 
 
 @guarded()
@@ -126,7 +131,7 @@ async def validate_release_plan(state: State) -> dict[str, Any]:
     result = validate_board(state, get_settings().ado_allowed_hosts)
     if result.errors or result.board is None:
         return {"valid": False, "errors": result.errors}
-    return {"valid": True, "state": result.board}
+    return {"valid": True}
 
 
 @guarded()
