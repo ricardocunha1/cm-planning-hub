@@ -120,7 +120,7 @@ Python 3.12, FastAPI, pandas/NumPy, httpx.
 | `app/schemas.py` | Pydantic request/response models — the API contract. |
 | `app/api/routes.py` | Monte Carlo: `GET /health`, `POST /validate`, `POST /simulate`. |
 | `app/api/ado_routes.py` | Azure DevOps proxy: `POST /ado/connect`, `/ado/backlog`, `/ado/sprint-history`. |
-| `app/mcp_server/` | MCP server mounted at `/api/mcp`: `server.py` (server, ASGI app, host/body limits), `plan_tools.py` and `ado_tools.py` (the 6 tools), `resources.py` (`release-plan://schema`), `errors.py`, `deps.py` (test seam). |
+| `app/mcp_server/` | MCP server mounted at `/api/mcp`: `server.py` (server, ASGI app, host/body limits), `plan_tools.py` and `ado_tools.py` (the 7 tools), `errors.py`, `deps.py` (test seam). |
 | `app/services/` | All business logic (routes stay thin): `validation` (form guardrails), `data_processing` (Excel parsing, sprint summary), `simulation` + `forecast` (vectorized NumPy Monte Carlo, percentiles, dates, histogram), `ado_*` (ADO client, URL rules, backlog and sprint-history reads), `ado_http` (shared ADO HTTP client for routes and MCP tools), `plan_board` (strict Release Plan board validator and JSON Schema, used by MCP only), `plans` (plan storage). |
 | `tests/` | pytest suite (unit, route, end-to-end incl. performance limits). |
 

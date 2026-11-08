@@ -29,6 +29,7 @@ TOOLS = {
     "create_release_plan",
     "update_release_plan",
     "ado_fetch_backlog",
+    "get_release_plan_schema",
 }
 
 
@@ -58,13 +59,13 @@ def store(clean_db):
 # --- registration ---------------------------------------------------------------
 
 
-def test_exactly_the_contract_tools_resource_and_no_prompts():
+def test_exactly_the_contract_tools_and_no_resources_or_prompts():
     async def listing(client):
         return await client.list_tools(), await client.list_resources(), await client.list_prompts()
 
     tools, resources, prompts = run_client(listing)
     assert {tool.name for tool in tools.tools} == TOOLS
-    assert [str(r.uri) for r in resources.resources] == ["release-plan://schema"]
+    assert resources.resources == []
     assert prompts.prompts == []
 
 
@@ -93,11 +94,8 @@ def test_schema_descriptions_explain_unplanned():
     assert "Unplanned" in feature["description"]
 
 
-def test_schema_resource_is_the_board_schema():
-    import json
-
-    contents = run_client(lambda c: c.read_resource("release-plan://schema")).contents
-    assert json.loads(contents[0].text) == board_json_schema()
+def test_get_release_plan_schema_returns_the_board_schema():
+    assert ok("get_release_plan_schema", {}) == board_json_schema()
 
 
 def test_a_fresh_server_has_the_tools_each_time():

@@ -54,7 +54,7 @@ def test_mcp_initialize_answers_200_without_redirect(env):
         response = client.post("/api/mcp", json=MCP_INITIALIZE, headers=MCP_HEADERS, follow_redirects=False)
     assert response.status_code == 200
     assert response.json()["result"]["serverInfo"]["name"] == "Planning Hub Release Plan"
-    assert "release-plan://schema" in response.json()["result"]["instructions"]
+    assert "get_release_plan_schema" in response.json()["result"]["instructions"]
 
 
 def test_mcp_refuses_a_host_that_is_not_allowed(env):

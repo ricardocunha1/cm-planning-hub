@@ -119,19 +119,18 @@ def test_tools_list_over_http_is_exactly_the_contract(mcp):
     tools = {t["name"]: t for t in mcp.rpc("tools/list")["result"]["tools"]}
     assert set(tools) == {
         "list_release_plans", "get_release_plan", "validate_release_plan",
-        "create_release_plan", "update_release_plan", "ado_fetch_backlog",
+        "create_release_plan", "update_release_plan", "ado_fetch_backlog", "get_release_plan_schema",
     }
     resources = mcp.rpc("resources/list")["result"]["resources"]
-    assert [r["uri"] for r in resources] == ["release-plan://schema"]
+    assert resources == []
     assert mcp.rpc("prompts/list")["result"]["prompts"] == []
     assert mcp.rpc("resources/templates/list")["result"]["resourceTemplates"] == []
     init = mcp.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "qa", "version": "0"}})
     assert len(init["result"]["instructions"]) < 400
 
 
-def test_resource_read_over_http_is_the_board_schema(mcp):
-    contents = mcp.rpc("resources/read", {"uri": "release-plan://schema"})["result"]["contents"]
-    assert json.loads(contents[0]["text"]) == board_json_schema()
+def test_get_release_plan_schema_over_http_is_the_board_schema(mcp):
+    assert mcp.ok("get_release_plan_schema", {}) == board_json_schema()
 
 
 @pytest.mark.parametrize("tool", ["validate_release_plan", "create_release_plan", "update_release_plan"])

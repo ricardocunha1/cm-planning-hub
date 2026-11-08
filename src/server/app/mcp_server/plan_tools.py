@@ -17,7 +17,6 @@ from app.services import plans
 from app.services.plan_board import board_json_schema, validate_board
 from app.services.plans import PLAN_STATE_SCHEMA, PLAN_PAGE_SIZE, plan_field_errors
 
-BOARD_SCHEMA_URI = "release-plan://schema"
 STATE_TOOLS = ("validate_release_plan", "create_release_plan", "update_release_plan")
 
 PAGE_INVALID = "Page must be 1 or greater."
@@ -40,7 +39,12 @@ VALIDATE_DESCRIPTION = (
     "{valid: true} or {valid: false, errors} listing every problem at once as "
     "`<path>: <problem>`. Fix the errors before create_release_plan or update_release_plan; "
     "those normalize the board (defaults filled) themselves. The format is the `state` input schema, also "
-    f"published as the resource {BOARD_SCHEMA_URI}."
+    "returned by get_release_plan_schema."
+)
+SCHEMA_DESCRIPTION = (
+    "Return the JSON Schema of the Release Plan board accepted by validate_release_plan, "
+    "create_release_plan and update_release_plan. Uniqueness, references between ids and the host "
+    "allowlist are checked by validate_release_plan, not by the schema."
 )
 CREATE_DESCRIPTION = (
     "Store a new Release Plan and return its summary with the `boardUrl` to give to the user. "
@@ -127,6 +131,11 @@ async def get_release_plan(planId: int) -> dict[str, Any]:
 
 
 @guarded()
+async def get_release_plan_schema() -> dict[str, Any]:
+    return board_json_schema()
+
+
+@guarded()
 async def validate_release_plan(state: State) -> dict[str, Any]:
     result = validate_board(state, get_settings().ado_allowed_hosts)
     if result.errors or result.board is None:
@@ -190,6 +199,7 @@ def register(server: MCPServer) -> None:
     """Register the Release Plan tools on `server`."""
     server.add_tool(list_release_plans, description=LIST_DESCRIPTION, annotations=_READ_ONLY)
     server.add_tool(get_release_plan, description=GET_DESCRIPTION, annotations=_READ_ONLY)
+    server.add_tool(get_release_plan_schema, description=SCHEMA_DESCRIPTION, annotations=_READ_ONLY)
     server.add_tool(validate_release_plan, description=VALIDATE_DESCRIPTION, annotations=_READ_ONLY)
     server.add_tool(create_release_plan, description=CREATE_DESCRIPTION, annotations=_WRITE)
     server.add_tool(update_release_plan, description=UPDATE_DESCRIPTION, annotations=_REPLACE)

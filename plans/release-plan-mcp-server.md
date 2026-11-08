@@ -403,3 +403,5 @@ An MCP server is mounted at `/api/mcp` in the existing FastAPI server (Streamabl
 4. Connect a client, e.g. `claude mcp add --transport http planning-hub https://<host>/api/mcp`, and check that `tools/list` returns the 6 tools.
 5. Tell users: the endpoint has no authentication (restrict at the network level if needed), and the PAT is passed as a tool argument.
 6. Existing boards: the next Sync from ADO may list descriptions as changed once, because of the new truncation.
+
+> **Note (2026-11-08):** the `release-plan://schema` resource was removed (many MCP clients don't read resources). The board JSON Schema is now returned by the read-only tool `get_release_plan_schema` (7 tools, no resources, no prompts); the `state` input schema of validate/create/update is unchanged. Earlier text above describes the original design.

@@ -17,12 +17,13 @@ This will allow AI models to create release plans and provide already a best-eff
 
 ## Tools
 
-The MCP server is mounted in the API server at `/api/mcp` (Streamable HTTP, stateless). It provides 6 tools (see `plans/release-plan-mcp-server.md` for the full contract):
+The MCP server is mounted in the API server at `/api/mcp` (Streamable HTTP, stateless). It provides 7 tools (see `plans/release-plan-mcp-server.md` for the full contract):
 
 | Tool | Purpose |
 | --- | --- |
 | `list_release_plans` | Paginated list of stored plans (`id`, name, project, `boardUrl`; no board). The `id` is an internal handle used only as `planId`; agents must not show it to the user. |
 | `get_release_plan` | One plan with its board, `id` and `boardUrl`. |
+| `get_release_plan_schema` | The JSON Schema of the board accepted by validate, create and update (no arguments). |
 | `validate_release_plan` | Validates a board; returns `{valid: true}` or all errors; stores nothing (create and update normalize the board themselves). |
 | `create_release_plan` | Validates and stores a new plan. |
 | `update_release_plan` | Validates and replaces a plan's board (and optionally its name). |
@@ -34,7 +35,7 @@ Create and update return a link to the board. Every failure (invalid board, unkn
 
 - **Azure DevOps link required.** Every board stored through MCP must carry `source` (kind, project URL, project, scope), so Sync from ADO always works. `projectType` and `projectName` are derived from `source`, and a plan's project cannot change on update.
 - **Strict validation.** Unlike the REST API, MCP rejects unknown keys and wrong types, reports all errors at once, fills optional fields and stores the normalized board, which equals what `normalizePlan` produces.
-- **The board JSON Schema is the only guidance the server publishes** (resource `release-plan://schema` and the `state` argument of the tools). There is no example board or prompt: the agent, or a skill driving it, decides how to turn a backlog into a board. The validator checks structure, not intent.
+- **The board JSON Schema is the only guidance the server publishes** (the `get_release_plan_schema` tool and the `state` argument of the tools); the server publishes no resources. There is no example board or prompt: the agent, or a skill driving it, decides how to turn a backlog into a board. The validator checks structure, not intent.
 - **Work items are trusted.** The board is not cross-checked against Azure DevOps.
 - **No authentication**, as in the REST API.
 - **The PAT is a tool argument.** It is used for that call only and is never stored, logged or returned.
