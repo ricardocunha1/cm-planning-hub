@@ -12,6 +12,7 @@ from pydantic import Field, SecretStr
 
 from app.config import get_settings
 from app.mcp_server import deps
+from app.mcp_server.arguments import PAT_SCHEMA, advertise_schema, pat_value, text_error
 from app.mcp_server.errors import guarded
 from app.schemas import AdoBacklogRequest, AdoBacklogResponse
 from app.services.ado_backlog import fetch_backlog, scope_field_errors
@@ -37,20 +38,34 @@ def _text(value: Any) -> str:
     return str(value).encode("utf-8", "replace").decode("utf-8")
 
 
+# Every argument is an optional `Any` (see `arguments`): the SDK would echo the
+# PAT in the error for a missing or malformed argument. The real schema is
+# advertised by `register`.
+_PROPERTIES: dict[str, dict[str, Any]] = {
+    "source": {
+        "type": "string",
+        "enum": ["onprem", "cloud"],
+        "description": '"onprem" (Azure DevOps Server) or "cloud" (dev.azure.com). Ask the user.',
+    },
+    "projectUrl": {"type": "string", "description": "The project URL, e.g. https://dev.azure.com/org/Project."},
+    "pat": PAT_SCHEMA,
+    "scopeType": {"type": "string", "enum": ["area", "iteration"], "description": '"area" or "iteration".'},
+    "scopePath": {"type": "string", "description": "The Area or Iteration path, e.g. `Project\\Team A`."},
+}
+
+
 @guarded(log_messages=False)
 async def ado_fetch_backlog(
-    source: Annotated[
-        str,
-        Field(
-            description='"onprem" (Azure DevOps Server) or "cloud" (dev.azure.com). Ask the user.',
-            json_schema_extra={"enum": ["onprem", "cloud"]},
-        ),
-    ],
-    projectUrl: Annotated[str, Field(description="The project URL, e.g. https://dev.azure.com/org/Project.")],
-    pat: Annotated[SecretStr, Field(description="Personal Access Token with read access to work items.")],
-    scopeType: Annotated[str, Field(description='"area" or "iteration".', json_schema_extra={"enum": ["area", "iteration"]})],
-    scopePath: Annotated[str, Field(description="The Area or Iteration path, e.g. `Project\\Team A`.")],
+    source: Any = None, projectUrl: Any = None, pat: Any = None, scopeType: Any = None, scopePath: Any = None
 ) -> dict[str, Any]:
+    secret, errors = pat_value(pat)
+    for argument, value in (("source", source), ("projectUrl", projectUrl), ("scopeType", scopeType), ("scopePath", scopePath)):
+        error = text_error(argument, value, required=True)
+        if error:
+            errors.append(error)
+    if errors or secret is None:
+        raise ToolError("\n".join(errors))
+    pat = secret
     data = {
         "source": source,
         "projectUrl": projectUrl,
@@ -79,3 +94,4 @@ async def ado_fetch_backlog(
 def register(server: MCPServer) -> None:
     """Register the Azure DevOps tool on `server`."""
     server.add_tool(ado_fetch_backlog, description=FETCH_DESCRIPTION, annotations=_READ_ONLY)
+    advertise_schema(server, "ado_fetch_backlog", _PROPERTIES, list(_PROPERTIES))

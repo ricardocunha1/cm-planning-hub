@@ -93,6 +93,13 @@ runs on both. Record the baseline with `python3` before starting.
   `PUBLIC_BASE_URL` setting. When it is unset, the value is the relative path
   `/release-plan/<id>`.
 
+> **Superseded by Phase 5 (2026-11-08):** `validate_release_plan`, `create_release_plan`
+> and `update_release_plan` no longer take a `state` board. They take the agent's
+> decisions only (connection, `pat`, milestones, flags, `epicOrder`, `assignments`) and
+> the server builds the board from a fresh ADO fetch. See **Phase 5** for the current
+> contract. The rows and rules below describe the original design (Phases 1-4); the
+> strict validator (`validate_board`) is still the safety net applied to every board.
+
 ## Tool contract
 All tools are registered on one `MCPServer`. Failures raise
 `mcp.server.mcpserver.exceptions.ToolError` (the call returns `is_error=True`), which
@@ -392,6 +399,85 @@ Status: Complete
 **Files:** `src/server/tests/test_mcp_integration.py` (agent flow: fake-ADO fetch → board built like `planFromBacklog` (Python port) → validate → create → `GET /api/plan/{id}` identical → update → UI-style `PUT`; a UI-saved Sprints board with flags that the agent can read, validate and update; fixture fixed-point check), `src/server/tests/fixtures/mcp_board_normalized.json` (`{releases, sprints}`, with flags and the `no-epic` Epic), `src/client/src/lib/releasePlan/mcpBoard.test.ts` (`normalizePlan(fixture)` deep-equals the fixture; `planConnection(source)` non-null). Docs: `specs/mcp_server.md`, `specs/release_plan.md`, `README.md`, `AGENTS.md`.
 
 **Notes:** UI-saved Releases/Sprints boards were already covered by `test_plan_board_integration.py`. The Python board builder in the test is a port of `fromBacklog.ts`, not the TypeScript itself.
+
+## Phase 5: Slim create/update input (server hydrates from Azure DevOps)
+**Status: Complete** (2026-11-08)
+
+Why: agents had to retype every Epic/Feature `title`, `state`, `size`, `iterationPath`
+and the up-to-2000-char HTML `description`; a slip failed strict validation and sent the
+agent into a retype loop. The agent only decides milestones, Epic order and Feature
+placement, so the server now copies the rest from Azure DevOps in the same call.
+
+Decisions (user, 2026-11-08):
+- The agent sends **no** titles/states/sizes/iteration paths/descriptions.
+- Epic membership of a Feature comes from the ADO parent (server). The **agent decides
+  Epic order** (`epicOrder`) and each Feature's milestone (`assignments`).
+- Reads keep descriptions (`get_release_plan`, `ado_fetch_backlog`): the agent uses them
+  to place Features. The `ADO_DESCRIPTION_MAX_CHARS` limit stays.
+- This reverses "no server port of `planFromBacklog`" for the grouping/building step
+  only. Client Sync (`syncDiff.ts`) is **not** ported: an update simply rebuilds from a
+  fresh fetch.
+
+Tool contract (camelCase; breaking):
+
+| Tool | Arguments |
+| --- | --- |
+| `validate_release_plan` | `connection`, `milestones`, `epicOrder`, `assignments`, `mode = "releases"`, `flags = []`. Offline: no ADO call, stores nothing. |
+| `create_release_plan` | `name`, `pat`, `connection`, `milestones`, `epicOrder`, `assignments`, `mode`, `flags` |
+| `update_release_plan` | `planId`, `pat`, `milestones`, `epicOrder`, `assignments`, `name = null`, `mode`, `flags`. The connection is the stored plan's `source`. |
+| `get_release_plan_schema` | JSON Schema of the decisions (not of the stored board) |
+
+- `connection`: `{source: onprem|cloud, projectUrl, scopeType: area|iteration, scopePath}`.
+- `epicOrder`: Epic ids left to right; `"no-epic"` is the orphan-Features column. Epics
+  missing from the list are appended in ascending id order, `no-epic` last. Unknown or
+  duplicate ids are errors.
+- `assignments`: `{featureId: milestoneId | null}`; absent Features are Unplanned.
+  Unknown Feature ids or milestone refs are errors. On update, absent Features also
+  become Unplanned, so the agent calls `get_release_plan` first and resends placements.
+- Features inside an Epic keep ascending ADO id order (not an input).
+- Server flow: validate decisions and connection (allowlist) → `fetch_backlog` →
+  `plan_from_backlog.build_board` (mirrors `fromBacklog.ts`) → `validate_board` → store.
+  Update refreshes every ADO field and drops items that left the scope. Any failure
+  writes nothing. The PAT is a `SecretStr` and never logged, stored or returned.
+
+### Tasks
+- [x] New `app/services/plan_from_backlog.py`: `Connection`, `PlanDecisions`, `parse_decisions`, `group_backlog`, `build_board`, `decisions_json_schema`.
+- [x] Rewrite the write side of `app/mcp_server/plan_tools.py`; advertise per-argument schemas; update `server.py` instructions.
+- [x] `get_release_plan_schema` returns the decisions schema.
+- [x] Unit tests (`test_plan_from_backlog.py`, `test_mcp_plan_tools.py`) and `specs/mcp_server.md`.
+- [x] Developer also updated `test_mcp_integration.py` / `test_mcp_tools_integration.py` to the new contract; QA re-reviewed them and added integration tests.
+- [x] README and AGENTS.md updated.
+- [x] Skill draft for `cm-release-plan-builder` delivered to the user (lives outside the repo).
+
+### Verification Plan
+```bash
+python3 -m compileall -q src/server/app
+cd src/server && .venv/bin/python -m pytest -q
+```
+
+### Phase Summary
+Done by `backend-developer` (code, unit tests, spec) then `qa-engineer` (review,
+integration tests). Baseline 1077 passed / 62 skipped; after the developer 1147 passed /
+50 skipped (verified by the coordinator). New: `services/plan_from_backlog.py`;
+`plan_board.structural_errors` is now public. There is no `release-plan://schema`
+resource (removed on 2026-11-08, see the note at the end). An explicit `null` for
+`mode`/`flags` equals omitted. A `connection` sent to `update_release_plan` is ignored
+(the stored one is used). Update uses two short DB sessions around the ADO call, so a
+concurrent write in between is last-write-wins (same limitation as before). The two
+size-limit tests on `state` were removed because there is no board argument any more.
+
+QA (2 cycles): cycle 1 found one Major, the MCP SDK's argument-validation error echoed
+part of the PAT when a required argument was missing. Fixed by declaring every argument
+of `create_release_plan`, `update_release_plan` and `ado_fetch_backlog` as `Any = None`
+and validating inside the tool (`mcp_server/arguments.py`), re-publishing the same
+schemas; errors name the argument and never echo values. Minors fixed: stale body-limit
+comment (limit kept at 6 MiB, tests rely on it), `UPDATE_DESCRIPTION` tells the agent to
+drop assignments of Features that left the backlog, size trimming reuses the JS
+whitespace set. Cycle 2: PASS, no open Blocker/Major. Outstanding Minor (by design):
+domain errors echo caller-sent non-secret ids (milestone ids, scope path).
+Added: `test_mcp_build_integration.py` (DB-gated integration, ~100 bad-argument cases).
+Final: compileall clean; pytest 1244 passed / 79 skipped without a DB, 1322 passed /
+1 skipped with Postgres 17 (database `planninghub`). Client untouched. Nothing committed.
 
 ## Final Recap
 An MCP server is mounted at `/api/mcp` in the existing FastAPI server (Streamable HTTP, stateless, JSON responses, no authentication, as the REST API). Six tools: `list_release_plans`, `get_release_plan`, `validate_release_plan`, `create_release_plan`, `update_release_plan` and `ado_fetch_backlog`; one resource, `release-plan://schema` (also advertised as the `state` input schema). A new strict validator (`services/plan_board.py`) guarantees that every stored board satisfies `normalizePlan(board) == board` and carries the ADO `source`, so Sync from ADO works; REST keeps its shallow check. ADO backlog descriptions are now truncated to `ADO_DESCRIPTION_MAX_CHARS` (default 2000) for both REST and MCP. New settings: `MCP_ALLOWED_HOSTS`, `PUBLIC_BASE_URL`, `ADO_DESCRIPTION_MAX_CHARS`. No production client code changed. Accepted limitations: no auth, the PAT passes through the agent's conversation, last write wins (close the board while an agent edits), and a valid board may differ from a UI-created one because the workflow lives in a skill, not on the server. Minor findings from phases 1-3 remain listed in their summaries (notably the use of the private `_tool_manager` SDK API: consider pinning `mcp<2.4`).

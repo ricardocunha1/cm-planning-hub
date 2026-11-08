@@ -12,14 +12,16 @@ from app.config import Settings
 from app.mcp_server import ado_tools, plan_tools
 
 MCP_PATH = "/api/mcp"
-# Above PLAN_STATE_MAX_BYTES (5 MiB) so a valid large board reaches the tool;
-# the SDK default of 4 MiB would refuse it first.
+# Request bodies are small now (the agent sends only its decisions), but the
+# limit stays at 6 MiB: tests/test_mcp_server.py exercises it, and it is above
+# the SDK default of 4 MiB and PLAN_STATE_MAX_BYTES (5 MiB).
 MAX_REQUEST_BODY_BYTES = 6 * 1024 * 1024
 
 INSTRUCTIONS = (
-    "Build and store Release Plan boards from an Azure DevOps backlog. "
-    "Always check a board with validate_release_plan before storing it; "
-    "get the board JSON Schema with get_release_plan_schema."
+    "Build and store Release Plan boards from an Azure DevOps backlog. Read it with ado_fetch_backlog, "
+    "then send only your decisions (milestones, flags, Epic order, Feature to milestone) to "
+    "create_release_plan or update_release_plan, which fill in the rest from Azure DevOps. Check them "
+    "with validate_release_plan; their schema is get_release_plan_schema."
 )
 
 

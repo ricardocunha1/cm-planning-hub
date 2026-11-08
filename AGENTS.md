@@ -101,7 +101,8 @@ push both images) → git tag.
     rules (ranking, percentiles, the `>50` sprints sentinel, business days).
   - `release-plan-board.md`, `release-plan-import-export.md`, `release-plan-ado.md` — Release Plan features reference.
   - `release-plan-persistence.md` — storing Release Plan boards in PostgreSQL.
-  - `release-plan-mcp-server.md` — the MCP server: decisions, tool contract,
+  - `release-plan-mcp-server.md` — the MCP server: decisions, tool contract
+    (Phase 5 = current slim create/update input),
     strict board validation rules and the ADO description limit.
 
   When working on a plan, follow its "For Future Agents" section (tick
@@ -120,8 +121,8 @@ Python 3.12, FastAPI, pandas/NumPy, httpx.
 | `app/schemas.py` | Pydantic request/response models — the API contract. |
 | `app/api/routes.py` | Monte Carlo: `GET /health`, `POST /validate`, `POST /simulate`. |
 | `app/api/ado_routes.py` | Azure DevOps proxy: `POST /ado/connect`, `/ado/backlog`, `/ado/sprint-history`. |
-| `app/mcp_server/` | MCP server mounted at `/api/mcp`: `server.py` (server, ASGI app, host/body limits), `plan_tools.py` and `ado_tools.py` (the 7 tools), `errors.py`, `deps.py` (test seam). |
-| `app/services/` | All business logic (routes stay thin): `validation` (form guardrails), `data_processing` (Excel parsing, sprint summary), `simulation` + `forecast` (vectorized NumPy Monte Carlo, percentiles, dates, histogram), `ado_*` (ADO client, URL rules, backlog and sprint-history reads), `ado_http` (shared ADO HTTP client for routes and MCP tools), `plan_board` (strict Release Plan board validator and JSON Schema, used by MCP only), `plans` (plan storage). |
+| `app/mcp_server/` | MCP server mounted at `/api/mcp`: `server.py` (server, ASGI app, host/body limits), `plan_tools.py` and `ado_tools.py` (the 7 tools; create/update take only decisions: connection, PAT, milestones, `epicOrder`, `assignments`), `errors.py`, `deps.py` (test seam). |
+| `app/services/` | All business logic (routes stay thin): `validation` (form guardrails), `data_processing` (Excel parsing, sprint summary), `simulation` + `forecast` (vectorized NumPy Monte Carlo, percentiles, dates, histogram), `ado_*` (ADO client, URL rules, backlog and sprint-history reads), `ado_http` (shared ADO HTTP client for routes and MCP tools), `plan_board` (strict Release Plan board validator, used by MCP only as the last check), `plan_from_backlog` (MCP only: parses the agent's decisions and builds the full board from a fresh ADO fetch, mirroring the client's `fromBacklog.ts`), `plans` (plan storage). |
 | `tests/` | pytest suite (unit, route, end-to-end incl. performance limits). |
 
 ### Client — `src/client`

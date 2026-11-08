@@ -1,15 +1,14 @@
 """QA end-to-end: the agent flow over real HTTP `POST /api/mcp` with PostgreSQL.
 
-fake-ADO `ado_fetch_backlog` -> the test builds a board from the returned
-`workItems` exactly as the client's `planFromBacklog` does
-(src/client/src/lib/releasePlan/fromBacklog.ts) -> `create_release_plan` ->
+fake-ADO `ado_fetch_backlog` -> `create_release_plan` with decisions only; the
+stored board equals what the client's `planFromBacklog` builds from the same
+backlog (src/client/src/lib/releasePlan/fromBacklog.ts) ->
 `GET /api/plan/{id}` returns the same board -> `update_release_plan` -> a
 UI-style `PUT /api/plan/{id}` still works and the strict validator accepts what
 the UI saved (so agents can update UI-created plans).
 
-Tasks 3 (UI-saved boards pass `validate_board` unchanged) is already covered for
-hand-built Releases and Sprints boards by test_plan_board_integration.py; here it
-is additionally checked on a `planFromBacklog`-shaped board fetched from fake ADO.
+The agent sends only its decisions; the server fetches the backlog and builds
+the board, which must equal the `planFromBacklog` port below.
 """
 
 import copy
@@ -83,111 +82,67 @@ def _fetch(stack):
     return backlog, args
 
 
+def _agent_args(args: dict, **overrides) -> dict:
+    """create_release_plan arguments: only the agent's decisions, no titles, states or descriptions."""
+    connection = {k: args[k] for k in ("source", "projectUrl", "scopeType", "scopePath")}
+    return {
+        "name": "Agent plan", "pat": args["pat"], "connection": connection,
+        "milestones": [{"id": "ms_test001", "name": "MVP"}],
+        "epicOrder": [101, 201, NO_EPIC_ID],
+        "assignments": {"102": "ms_test001", "103": "ms_test001", "104": "ms_test001", "105": "ms_test001"},
+        **overrides,
+    }
+
+
 @pytest.mark.db
-def test_agent_flow_fetch_build_create_get_update_and_ui_put(stack, fixed_clock):
+def test_agent_flow_fetch_decide_create_get_update_and_ui_put(stack, fixed_clock):
     backlog, args = _fetch(stack)
     # synthetic backlog: Epic 101 (Feature 102), Epic 201 (parent of Feature 103, fetched as the parent) and
     # orphans 104 (no parent) and 105 (parent is a User Story)
     assert [w["id"] for w in backlog["workItems"] if w["type"] == "Feature"] == [102, 103, 104, 105]
 
-    built = plan_from_backlog(backlog, args)
-    assert [e["id"] for e in built["epics"]] == [101, 201, NO_EPIC_ID]
-    assert [f["id"] for f in built["epics"][1]["features"]] == [103]
-    assert [f["id"] for f in built["epics"][2]["features"]] == [104, 105]
-    assert built["epics"][0]["features"][0]["size"] == "M"  # " m " trimmed and upper-cased
-
-    # what the UI would save passes the strict validator unchanged
-    validated = validate_board(copy.deepcopy(built), HOSTS)
-    assert validated.errors == [] and validated.board == built
-
-    # the agent validates, then stores
-    check = stack.ok("validate_release_plan", {"state": built})
-    assert check == {"valid": True}
-    created = stack.ok("create_release_plan", {"name": built["name"], "state": built})
+    # the agent sends decisions only; the server builds the board `planFromBacklog` would build
+    expected = plan_from_backlog(backlog, args)
+    expected["name"] = "Agent plan"
+    with deps.override_providers(ado_client=_serve(FakeAdo(work_items=synthetic_backlog()))):
+        created = stack.ok("create_release_plan", _agent_args(args))
     plan_id = created["id"]
     assert created["projectType"] == "cloud" and created["projectName"] == backlog["project"]["name"]
     assert created["boardUrl"] == f"https://hub.example.com/release-plan/{plan_id}"
 
-    # GET /api/plan/{id} returns the same board (as stored: name equals the column)
     detail = stack.client.get(f"/api/plan/{plan_id}")
     assert detail.status_code == 200
-    assert detail.json()["state"] == built
-    assert stack.ok("get_release_plan", {"planId": plan_id})["state"] == built
-
-    # no PAT anywhere in the stored board
+    assert detail.json()["state"] == expected
+    assert stack.ok("get_release_plan", {"planId": plan_id})["state"] == expected
+    assert [e["id"] for e in expected["epics"]] == [101, 201, NO_EPIC_ID]
     assert args["pat"] not in detail.text
+    # what the server stored passes the strict validator unchanged
+    validated = validate_board(copy.deepcopy(expected), HOSTS)
+    assert validated.errors == [] and validated.board == expected
 
-    # the agent moves every Feature of the first Epic to a new dated milestone and renames the plan
-    edited = copy.deepcopy(built)
-    edited["milestones"].append({"id": "ms_second1", "name": "R2", "date": "2026-12-31", "color": "#60C5B5"})
-    edited["epics"][0]["features"][0]["milestoneId"] = "ms_second1"
-    updated = stack.ok("update_release_plan", {"planId": plan_id, "state": edited, "name": "Renamed by agent"})
+    # the agent reorders the Epics, adds a milestone, moves a Feature and renames the plan
+    decisions = {
+        "milestones": [{"id": "ms_test001", "name": "MVP"}, {"id": "ms_second1", "name": "R2", "date": "2026-12-31"}],
+        "epicOrder": [NO_EPIC_ID, 201],
+        "assignments": {"102": "ms_second1"},
+    }
+    with deps.override_providers(ado_client=_serve(FakeAdo(work_items=synthetic_backlog()))):
+        updated = stack.ok("update_release_plan", {"planId": plan_id, "pat": args["pat"], "name": "Renamed by agent", **decisions})
     assert updated["name"] == "Renamed by agent"
     stored = stack.client.get(f"/api/plan/{plan_id}").json()
     assert stored["name"] == "Renamed by agent" and stored["state"]["name"] == "Renamed by agent"
+    assert [e["id"] for e in stored["state"]["epics"]] == [NO_EPIC_ID, 201, 101]
     assert stored["state"]["milestones"][1]["id"] == "ms_second1"
-    assert stored["state"]["epics"][0]["features"][0]["milestoneId"] == "ms_second1"
+    by_id = {f["id"]: f["milestoneId"] for e in stored["state"]["epics"] for f in e["features"]}
+    assert by_id == {102: "ms_second1", 103: None, 104: None, 105: None}
 
     # UI-style autosave (shallow validation) still works, with a savedAt the UI adds
     ui_state = copy.deepcopy(stored["state"])
     ui_state["savedAt"] = "2026-10-23T10:05:00.000Z"
-    ui_state["epics"][2]["features"][0]["milestoneId"] = None  # unplanned
+    ui_state["epics"][0]["features"][0]["milestoneId"] = None
     put = stack.client.put(f"/api/plan/{plan_id}", json={"name": "Renamed by agent", "state": ui_state})
     assert put.status_code == 200, put.text
     assert put.json()["state"] == ui_state
-
-    # and the agent can update what the UI saved, unchanged
-    ui_saved = stack.ok("get_release_plan", {"planId": plan_id})["state"]
-    assert validate_board(copy.deepcopy(ui_saved), HOSTS).board == ui_saved
-    again = stack.ok("update_release_plan", {"planId": plan_id, "state": ui_saved})
-    assert again["name"] == "Renamed by agent"
-    assert stack.client.get(f"/api/plan/{plan_id}").json()["state"] == ui_saved
-
-
-@pytest.mark.db
-def test_ui_saved_sprints_board_with_flags_can_be_updated_by_an_agent(stack, fixed_clock):
-    """A Sprints-mode board with flags saved through REST (as the UI does) is accepted unchanged by the MCP tools."""
-    backlog, args = _fetch(stack)
-    board = plan_from_backlog(backlog, args)
-    board["mode"] = "sprints"
-    board["milestones"] = [
-        {"id": "ms_s1", "name": "Sprint 01", "date": "2026-10-30", "color": "#4E98D1"},
-        {"id": "ms_s2", "name": "Sprint 02", "date": "2026-11-13", "color": "#60C5B5"},
-    ]
-    board["flags"] = [{"id": "fl_abc1234", "name": "Freeze", "date": "2026-11-01", "afterMsId": "ms_s1"}]
-    for epic in board["epics"]:
-        for f in epic["features"]:
-            f["milestoneId"] = "ms_s1"
-    board["savedAt"] = "2026-10-23T10:00:00.000Z"
-
-    created = stack.client.post(
-        "/api/plan", json={"name": board["name"], "projectType": "cloud", "projectName": board["source"]["project"], "state": board}
-    )
-    assert created.status_code in (200, 201), created.text
-    plan_id = created.json()["id"]
-    got = stack.ok("get_release_plan", {"planId": plan_id})["state"]
-    assert got == board
-    assert stack.ok("validate_release_plan", {"state": got}) == {"valid": True}
-    assert validate_board(got, ("dev.azure.com",)).board == board
-    stack.ok("update_release_plan", {"planId": plan_id, "state": got})
-    assert stack.client.get(f"/api/plan/{plan_id}").json()["state"] == board
-
-
-@pytest.mark.db
-def test_validate_then_create_with_the_same_raw_board_stores_the_normalized_board(stack):
-    raw = {
-        "schema": "release-planner-features",
-        "source": {"project": "Proj", "kind": "cloud", "projectUrl": "https://dev.azure.com/org/Proj",
-                   "scopeType": "area", "scopePath": "Proj\\Team"},
-        "milestones": [{"id": "ms_a", "name": "MVP"}],
-        "epics": [{"id": 1, "title": "Epic", "features": [{"id": 10, "title": "F", "milestoneId": "ms_a"}]}],
-    }
-    assert stack.ok("validate_release_plan", {"state": copy.deepcopy(raw)}) == {"valid": True}
-    expected = validate_board(copy.deepcopy(raw), HOSTS).board
-    assert expected != raw and expected["milestones"][0]["color"].startswith("#")
-    created = stack.ok("create_release_plan", {"name": "Raw", "state": copy.deepcopy(raw)})
-    stored = stack.client.get(f"/api/plan/{created['id']}").json()["state"]
-    assert stored == {**expected, "name": "Raw"}
 
 
 def test_normalized_board_fixture_is_a_fixed_point_of_validate_board():

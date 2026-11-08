@@ -177,9 +177,15 @@ claude mcp add --transport http planning-hub https://<host>/api/mcp
 Tools:
 
 - `ado_fetch_backlog` — reads the backlog work items from Azure DevOps
-- `validate_release_plan` — checks a board and returns every error; stores nothing.
-- `create_release_plan`, `update_release_plan` — store a board (update replaces it entirely).
-- `list_release_plans`, `get_release_plan` — browse stored plans.
+- `get_release_plan_schema` — the JSON Schema of what the agent decides.
+- `validate_release_plan` — checks the agent's decisions offline and returns every error; stores nothing.
+- `create_release_plan`, `update_release_plan` — the agent sends only the
+  milestones, the Epic order (`epicOrder`) and which milestone each Feature
+  goes in (`assignments`), plus the Azure DevOps connection and PAT. The server
+  fetches the backlog in the same call and fills in titles, states, sizes,
+  iteration paths and descriptions, so the agent never retypes them. Update
+  replaces the decisions and refreshes everything from Azure DevOps.
+- `list_release_plans`, `get_release_plan` — browse stored plans (the board includes descriptions).
 
 ## Architecture
 

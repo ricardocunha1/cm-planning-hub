@@ -22,7 +22,7 @@ from app.main import app
 from app.mcp_server import deps
 from app.mcp_server.errors import UNEXPECTED_ERROR
 from app.services import ado_backlog
-from app.services.plan_board import board_json_schema, validate_board
+from app.services.plan_from_backlog import decisions_json_schema
 from mcp_helpers import db_provider
 
 HEADERS = {"Accept": "application/json, text/event-stream"}
@@ -36,15 +36,32 @@ LOCAL_SETTINGS = Settings(
 )
 
 
-def board(**overrides):
-    state = {
-        "schema": "release-planner-features",
-        "source": {"project": "Proj", "kind": "cloud", "projectUrl": URL, "scopeType": "area", "scopePath": "Proj\\Team"},
+def decisions(**overrides):
+    """The agent's decisions for `_fake_ado()`: Epic 1 with Feature 2."""
+    data = {
         "milestones": [{"id": "ms_a", "name": "MVP"}],
-        "epics": [{"id": 1, "title": "Epic", "features": [{"id": 10, "title": "F", "milestoneId": "ms_a"}]}],
+        "epicOrder": [1],
+        "assignments": {"2": "ms_a"},
     }
-    state.update(overrides)
-    return state
+    data.update(overrides)
+    return data
+
+
+def connection():
+    return {
+        "source": "cloud",
+        "projectUrl": f"https://dev.azure.com/contoso/{PROJECT_NAME.replace(' ', '%20')}",
+        "scopeType": "area",
+        "scopePath": f"{PROJECT_NAME}\\Team A",
+    }
+
+
+def create_args(**overrides):
+    return {"name": "Plan", "pat": PAT, "connection": connection(), **decisions(), **overrides}
+
+
+def update_args(plan_id, **overrides):
+    return {"planId": plan_id, "pat": PAT, **decisions(), **overrides}
 
 
 class Mcp:
@@ -129,12 +146,12 @@ def test_tools_list_over_http_is_exactly_the_contract(mcp):
     assert len(init["result"]["instructions"]) < 400
 
 
-def test_get_release_plan_schema_over_http_is_the_board_schema(mcp):
-    assert mcp.ok("get_release_plan_schema", {}) == board_json_schema()
+def test_get_release_plan_schema_over_http_is_the_decisions_schema(mcp):
+    assert mcp.ok("get_release_plan_schema", {}) == decisions_json_schema()
 
 
 @pytest.mark.parametrize("tool", ["validate_release_plan", "create_release_plan", "update_release_plan"])
-def test_advertised_state_schema_is_usable_by_a_json_schema_validator(mcp, tool):
+def test_advertised_input_schema_is_usable_by_a_json_schema_validator(mcp, tool):
     """`$defs` are at the root of the tool's input schema and every `$ref` resolves."""
     tools = {t["name"]: t for t in mcp.rpc("tools/list")["result"]["tools"]}
     input_schema = tools[tool]["inputSchema"]
@@ -154,58 +171,39 @@ def test_advertised_state_schema_is_usable_by_a_json_schema_validator(mcp, tool)
 
     walk(input_schema)
     assert refs and all(ref.startswith("#/$defs/") and ref.split("/")[-1] in input_schema["$defs"] for ref in refs)
-    arguments = {"state": validate_board(board(), ("dev.azure.com",)).board, "name": "n", "planId": 1}
+    arguments = {"name": "n", "planId": 1, "pat": PAT, "connection": connection(), **decisions()}
+    arguments = {k: v for k, v in arguments.items() if k in input_schema["properties"]}
     validator = Draft202012Validator(input_schema)
     assert list(validator.iter_errors(arguments)) == []
-    broken = {**arguments, "state": {**arguments["state"], "milestones": [{"id": 5}]}}
+    broken = {**arguments, "milestones": [{"id": 5}]}
     assert list(validator.iter_errors(broken))
 
 
-def test_validate_reports_all_errors_for_a_well_keyed_malformed_state(mcp):
-    state = board(
-        milestones=[{"id": "a", "name": "A"}, {"id": "a", "name": ""}],
-        epics=[{"id": True, "title": 5, "features": [{"id": 1, "title": "x", "milestoneId": "zz"}, {"id": "1", "title": "y"}]}],
-        mode="weeks",
+def test_validate_reports_all_reference_errors_and_create_lists_the_same(mcp):
+    args = decisions(
+        milestones=[{"id": "a", "name": "A"}, {"id": "a", "name": "B"}],
+        epicOrder=[1, 1],
+        assignments={"2": "zz"},
     )
-    result = mcp.ok("validate_release_plan", {"state": state})
+    result = mcp.ok("validate_release_plan", {"connection": connection(), **args})
     assert result["valid"] is False
     text = "\n".join(result["errors"])
-    for expected in ("mode", "milestones[1].name", "epics[0].id", "epics[0].title", "milestoneId"):
+    for expected in ("duplicate milestone id", "epicOrder[1]", "assignments['2']"):
         assert expected in text
-    assert len(result["errors"]) >= 5
-    # same list reaches the agent as the ToolError text on create / update
-    for tool, args in (("create_release_plan", {"name": "x"}), ("update_release_plan", {"planId": 1})):
-        message = mcp.fail(tool, {**args, "state": state})
-        assert message.count("\n- ") == len(result["errors"])
+    message = mcp.fail("create_release_plan", create_args(**args))
+    assert message.count("\n- ") == len(result["errors"])
 
 
-@pytest.mark.parametrize("state", [5, "not json", [], None, {}, {"schema": 5}, {"schema": "other"}])
-def test_non_object_or_unrecognized_state_is_a_clean_error_on_all_tools(mcp, state):
-    assert mcp.ok("validate_release_plan", {"state": state})["valid"] is False
-    assert "invalid" in mcp.fail("create_release_plan", {"name": "x", "state": state})
-    assert "invalid" in mcp.fail("update_release_plan", {"planId": 1, "state": state})
+@pytest.mark.parametrize("value", [5, "not json", [], None])
+def test_malformed_decisions_are_a_clean_error_on_all_tools(mcp, value):
+    assert mcp.ok("validate_release_plan", {"connection": connection(), **decisions(milestones=value)})["valid"] is False
+    assert "invalid" in mcp.fail("create_release_plan", create_args(milestones=value))
+    assert "invalid" in mcp.fail("update_release_plan", update_args(1, milestones=value))
 
 
-def test_a_json_string_state_is_decoded_by_the_sdk_and_validated_as_an_object(mcp):
-    result = mcp.ok("validate_release_plan", {"state": json.dumps(board())})
-    assert result == {"valid": True}
-    bad = mcp.ok("validate_release_plan", {"state": json.dumps(board(milestones="x"))})
-    assert bad["valid"] is False and "milestones" in "\n".join(bad["errors"])
-
-
-def test_missing_state_argument_is_a_tool_error_not_a_crash(mcp):
+def test_missing_required_argument_is_a_tool_error_not_a_crash(mcp):
     result = mcp.raw("validate_release_plan", {})
-    assert result["isError"] is True and "state" in result["content"][0]["text"]
-
-
-def test_a_state_over_4_mib_reaches_the_tool_and_over_5_mib_is_refused_by_it(mcp):
-    big = board()
-    big["epics"][0]["features"][0]["description"] = "x" * (4 * 1024 * 1024 + 100_000)
-    assert mcp.ok("validate_release_plan", {"state": big})["valid"] is True
-    huge = board()
-    huge["epics"][0]["features"][0]["description"] = "x" * (5 * 1024 * 1024 + 10)
-    result = mcp.ok("validate_release_plan", {"state": huge})
-    assert result["valid"] is False and "too large" in result["errors"][0]
+    assert result["isError"] is True and "connection" in result["content"][0]["text"]
 
 
 def test_unknown_tool_and_bad_arguments_do_not_500(mcp):
@@ -226,9 +224,9 @@ def test_unexpected_error_is_generic_and_logged_server_side(mcp, monkeypatch, ca
     def boom(*a, **k):
         raise RuntimeError("secret-internal-detail")
 
-    monkeypatch.setattr(plan_tools, "validate_board", boom)
+    monkeypatch.setattr(plan_tools, "parse_decisions", boom)
     with caplog.at_level(logging.DEBUG):
-        message = mcp.fail("validate_release_plan", {"state": board()})
+        message = mcp.fail("validate_release_plan", {"connection": connection(), **decisions()})
     assert UNEXPECTED_ERROR in message and "secret-internal-detail" not in message
     assert any(r.exc_info for r in caplog.records)
 
@@ -240,10 +238,11 @@ def test_database_down_maps_to_db_unavailable_for_every_db_tool(mcp):
     with deps.override_providers(session=db_provider("postgresql+asyncpg://u:p@127.0.0.1:1/none")):
         assert mcp.fail("list_release_plans", {}) == f"Error executing tool list_release_plans: {DB_UNAVAILABLE}"
         assert DB_UNAVAILABLE in mcp.fail("get_release_plan", {"planId": 1})
-        assert DB_UNAVAILABLE in mcp.fail("create_release_plan", {"name": "n", "state": board()})
-        assert DB_UNAVAILABLE in mcp.fail("update_release_plan", {"planId": 1, "state": board()})
+        assert DB_UNAVAILABLE in mcp.fail("update_release_plan", update_args(1))
+        with deps.override_providers(ado_client=_serve(_fake_ado())):
+            assert DB_UNAVAILABLE in mcp.fail("create_release_plan", create_args())
         # validate does not need the database
-        assert mcp.ok("validate_release_plan", {"state": board()})["valid"] is True
+        assert mcp.ok("validate_release_plan", {"connection": connection(), **decisions()})["valid"] is True
 
 
 # --- plans with PostgreSQL ---------------------------------------------------------------------
@@ -251,9 +250,10 @@ def test_database_down_maps_to_db_unavailable_for_every_db_tool(mcp):
 
 @pytest.mark.db
 def test_create_get_list_update_and_ui_style_put_round_trip(stack):
-    created = stack.ok("create_release_plan", {"name": "  Plan A ", "state": board(name="ignored", savedAt="2026-01-01T00:00:00Z")})
+    with deps.override_providers(ado_client=_serve(_fake_ado())):
+        created = stack.ok("create_release_plan", create_args(name="  Plan A "))
     assert created["name"] == "Plan A"
-    assert created["projectType"] == "cloud" and created["projectName"] == "Proj"
+    assert created["projectType"] == "cloud" and created["projectName"] == PROJECT_NAME
     assert created["boardUrl"] == f"https://hub.example.com/release-plan/{created['id']}"
     plan_id = created["id"]
 
@@ -263,6 +263,9 @@ def test_create_get_list_update_and_ui_style_put_round_trip(stack):
     assert detail["name"] == "Plan A" and detail["state"]["name"] == "Plan A"
     assert detail["state"]["milestones"][0]["color"]  # defaults filled
     assert detail["state"]["source"]["system"] == "Azure DevOps"
+    assert detail["state"]["epics"][0]["features"][0]["milestoneId"] == "ms_a"
+    assert detail["state"]["epics"][0]["description"].endswith("…")  # truncated at 40 characters
+    assert PAT not in rest.text
     via_mcp = stack.ok("get_release_plan", {"planId": plan_id})
     assert {k: v for k, v in via_mcp.items() if k != "boardUrl"} == detail
     listed = stack.ok("list_release_plans", {})
@@ -271,14 +274,13 @@ def test_create_get_list_update_and_ui_style_put_round_trip(stack):
     assert listed["items"][0]["boardUrl"] == created["boardUrl"] and via_mcp["id"] == plan_id
 
     # null name keeps the stored name; state.name follows the column
-    new_state = copy.deepcopy(detail["state"])
-    new_state["name"] = "typed by agent"
-    new_state["epics"][0]["features"][0]["title"] = "Changed"
-    updated = stack.ok("update_release_plan", {"planId": plan_id, "state": new_state})
+    with deps.override_providers(ado_client=_serve(_fake_ado())):
+        updated = stack.ok("update_release_plan", update_args(plan_id, assignments={}))
     assert updated["name"] == "Plan A"
     after = stack.client.get(f"/api/plan/{plan_id}").json()
-    assert after["state"]["name"] == "Plan A" and after["state"]["epics"][0]["features"][0]["title"] == "Changed"
-    renamed = stack.ok("update_release_plan", {"planId": plan_id, "state": new_state, "name": " Plan B "})
+    assert after["state"]["name"] == "Plan A" and after["state"]["epics"][0]["features"][0]["milestoneId"] is None
+    with deps.override_providers(ado_client=_serve(_fake_ado())):
+        renamed = stack.ok("update_release_plan", update_args(plan_id, name=" Plan B "))
     assert renamed["name"] == "Plan B"
     after = stack.client.get(f"/api/plan/{plan_id}").json()
     assert after["name"] == "Plan B" and after["state"]["name"] == "Plan B"
@@ -289,64 +291,69 @@ def test_create_get_list_update_and_ui_style_put_round_trip(stack):
     put = stack.client.put(f"/api/plan/{plan_id}", json={"name": "Plan C", "state": {**ui_state, "name": "Plan C"}})
     assert put.status_code == 200, put.text
     assert stack.ok("get_release_plan", {"planId": plan_id})["state"]["epics"][0]["title"] == "From the UI"
-    # a board saved by the UI is accepted by the strict validator
-    again = stack.ok("update_release_plan", {"planId": plan_id, "state": stack.ok("get_release_plan", {"planId": plan_id})["state"]})
+    # and an agent can update what the UI saved: the next update refreshes the title from Azure DevOps
+    with deps.override_providers(ado_client=_serve(_fake_ado())):
+        again = stack.ok("update_release_plan", update_args(plan_id))
     assert again["name"] == "Plan C"
+    assert stack.client.get(f"/api/plan/{plan_id}").json()["state"]["epics"][0]["title"] == "E"
 
 
 @pytest.mark.db
 def test_update_errors_unknown_id_and_project_change(stack):
-    plan_id = stack.ok("create_release_plan", {"name": "P", "state": board()})["id"]
-    assert stack.fail("update_release_plan", {"planId": 999, "state": board()}).endswith("Release plan not found: 999.")
+    with deps.override_providers(ado_client=_serve(_fake_ado())):
+        plan_id = stack.ok("create_release_plan", create_args(name="P"))["id"]
+        assert stack.fail("update_release_plan", update_args(999)).endswith("Release plan not found: 999.")
     assert stack.fail("get_release_plan", {"planId": 999}).endswith("Release plan not found: 999.")
     assert stack.fail("get_release_plan", {"planId": 2**40}).endswith(f"Release plan not found: {2**40}.")
     assert stack.fail("get_release_plan", {"planId": -1}).endswith("Release plan not found: -1.")
-    other = board()
-    other["source"]["project"] = "Other"
-    message = stack.fail("update_release_plan", {"planId": plan_id, "state": other})
-    assert message.endswith("The plan's project cannot be changed (stored: cloud · Proj).")
-    onprem = board()
-    onprem["source"] = {**onprem["source"], "kind": "onprem", "projectUrl": "https://dev.azure.com/org/Proj"}
-    message = stack.fail("update_release_plan", {"planId": plan_id, "state": onprem})
-    assert "project cannot be changed" in message or "invalid" in message
-    padded = board()
-    padded["source"]["project"] = "  Proj  "
-    assert stack.ok("update_release_plan", {"planId": plan_id, "state": padded})["projectName"] == "Proj"
-    # refused updates changed nothing: the title is still the original one
-    assert stack.client.get(f"/api/plan/{plan_id}").json()["state"]["epics"][0]["title"] == "Epic"
+    # the stored project name no longer matches the one Azure DevOps reports
+    stored = stack.client.get(f"/api/plan/{plan_id}").json()
+    run_sql_project(stack, plan_id, "Other")
+    with deps.override_providers(ado_client=_serve(_fake_ado())):
+        message = stack.fail("update_release_plan", update_args(plan_id))
+    assert message.endswith("The plan's project cannot be changed (stored: cloud · Other).")
+    # refused updates changed nothing
+    assert stack.client.get(f"/api/plan/{plan_id}").json()["state"] == stored["state"]
+
+
+def run_sql_project(stack, plan_id, project_name):
+    """Change the stored project name of a plan through REST-independent SQL."""
+    import os
+
+    from db_helpers import run_sql
+
+    run_sql(os.environ["TEST_DATABASE_URL"], f"UPDATE release_plans SET project_name = '{project_name}' WHERE id = {int(plan_id)}")
 
 
 @pytest.mark.db
 @pytest.mark.parametrize("name,message", [("", "required"), ("   ", "required"), ("x" * 201, "at most 200"), ("a\x00b", "invalid characters")])
 def test_name_errors_use_the_existing_texts(stack, name, message):
-    assert message in stack.fail("create_release_plan", {"name": name, "state": board()})
-    assert message in stack.fail("update_release_plan", {"planId": 1, "state": board(), "name": name})
+    assert message in stack.fail("create_release_plan", create_args(name=name))
+    assert message in stack.fail("update_release_plan", update_args(1, name=name))
     assert stack.ok("list_release_plans", {})["total"] == 0
 
 
 @pytest.mark.db
-def test_invalid_board_stores_nothing_and_validate_stores_nothing(stack):
-    bad = board(milestones="x")
-    assert "Release plan is invalid:" in stack.fail("create_release_plan", {"name": "n", "state": bad})
-    assert stack.ok("validate_release_plan", {"state": board()})["valid"] is True
+def test_invalid_decisions_and_ado_failures_store_nothing_and_validate_stores_nothing(stack):
+    bad = create_args(milestones="x")
+    assert "Release plan is invalid:" in stack.fail("create_release_plan", bad)
+    with deps.override_providers(ado_client=_serve(_fake_ado(failures={"any": "500"}))):
+        assert PAT not in stack.fail("create_release_plan", create_args())
+    with deps.override_providers(ado_client=_serve(_fake_ado())):
+        assert "unknown Feature id" in stack.fail("create_release_plan", create_args(assignments={"99": None}))
+    assert stack.ok("validate_release_plan", {"connection": connection(), **decisions()})["valid"] is True
     assert stack.ok("list_release_plans", {})["total"] == 0
-
-
-@pytest.mark.db
-def test_a_big_valid_board_is_stored_through_http(stack):
-    big = board()
-    big["epics"][0]["features"][0]["description"] = "y" * (4 * 1024 * 1024 + 50_000)
-    created = stack.ok("create_release_plan", {"name": "big", "state": big})
-    assert len(stack.client.get(f"/api/plan/{created['id']}").json()["state"]["epics"][0]["features"][0]["description"]) > 4 * 1024 * 1024
 
 
 @pytest.mark.db
 def test_list_pages_and_concurrent_creates_use_separate_sessions(stack):
     errors: list[str] = []
+    ado = deps.override_providers(ado_client=_serve(_fake_ado()))
+    ado.__enter__()
 
     def create(index: int) -> None:
         try:
-            result = Mcp(stack.client).raw("create_release_plan", {"name": f"P{index}", "state": board()})
+            result = Mcp(stack.client).raw("create_release_plan", create_args(name=f"P{index}"))
             if result["isError"]:
                 errors.append(result["content"][0]["text"])
         except Exception as exc:  # noqa: BLE001
@@ -357,6 +364,7 @@ def test_list_pages_and_concurrent_creates_use_separate_sessions(stack):
         thread.start()
     for thread in threads:
         thread.join()
+    ado.__exit__(None, None, None)
     assert errors == []
     first = stack.ok("list_release_plans", {})
     second = stack.ok("list_release_plans", {"page": 2})

@@ -261,7 +261,7 @@ def validate_board(state: Any, allowed_hosts: Iterable[str]) -> BoardResult:
     try:
         board = Board.model_validate(state)
     except ValidationError as exc:
-        errors.extend(_structural_errors(exc))
+        errors.extend(structural_errors(exc))
     errors.extend(_reference_errors(state, tuple(allowed_hosts)))
     errors = list(dict.fromkeys(errors))
     if errors or board is None:
@@ -301,7 +301,8 @@ def _problem(error: Any) -> str:
     return str(error["msg"])
 
 
-def _structural_errors(exc: ValidationError) -> list[str]:
+def structural_errors(exc: ValidationError) -> list[str]:
+    """Each validation error as `<path>: <problem>`."""
     return [f"{_path(e['loc'])}: {_problem(e)}" if e["loc"] else _problem(e) for e in exc.errors()]
 
 
