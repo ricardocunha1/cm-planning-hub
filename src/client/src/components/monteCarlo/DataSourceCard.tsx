@@ -5,8 +5,8 @@ import type { DataSource } from "../../lib/monteCarlo/types";
 import { DatabaseIcon } from "../icons/DatabaseIcon";
 import { FileSpreadsheetIcon } from "../icons/FileSpreadsheetIcon";
 
-const termClass = "text-xs uppercase tracking-wide text-slate-400";
-const detailClass = "break-all text-sm font-medium text-slate-100";
+const termClass = "text-xs uppercase tracking-wide text-fg-subtle";
+const detailClass = "break-all text-sm font-medium text-fg";
 
 /**
  * Compact summary of the chosen sprint history source shown above the Monte
@@ -19,7 +19,7 @@ export function DataSourceCard({ dataSource }: { dataSource: DataSource }) {
   const Icon = isExcel ? FileSpreadsheetIcon : DatabaseIcon;
 
   return (
-    <section aria-labelledby={headingId} className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-900 p-4">
+    <section aria-labelledby={headingId} className="flex items-start gap-3 rounded-lg border border-line bg-surface p-4">
       <span
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md"
         style={{ backgroundColor: "var(--cm-dark-blue)", color: "var(--cm-teal)" }}
@@ -27,7 +27,7 @@ export function DataSourceCard({ dataSource }: { dataSource: DataSource }) {
         <Icon className="h-5 w-5" />
       </span>
       <div className="min-w-0 flex-1">
-        <h3 id={headingId} className="text-sm font-semibold text-slate-200">
+        <h3 id={headingId} className="text-sm font-semibold text-fg-soft">
           Data source: {isExcel ? "Excel file" : "Azure DevOps"}
         </h3>
         <dl className="mt-2 grid gap-2">
@@ -56,8 +56,7 @@ export function DataSourceCard({ dataSource }: { dataSource: DataSource }) {
       </div>
       <Link
         to={MONTE_CARLO_ROUTES.dataSource}
-        className="shrink-0 rounded text-sm font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
-        style={{ color: "var(--cm-light-blue)" }}
+        className="shrink-0 rounded text-sm font-medium text-accent-blue hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
         aria-label="Change data source"
       >
         Change

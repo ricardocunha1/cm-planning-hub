@@ -146,7 +146,7 @@ describe("Release Plan – saved plans list and create-with-name (integration)",
     expect(within(screen.getByRole("table")).getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
       "Name",
       "Project",
-      "Created",
+      "Created On",
       "Last modified",
       "Actions",
     ]);

@@ -12,7 +12,7 @@ import type { AdoSprintHistory, DataSource } from "../../lib/monteCarlo/types";
 import { useForecast } from "../../monteCarloStore";
 
 const cardBase =
-  "flex h-full w-full flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900 p-5 text-left transition-colors hover:border-[color:var(--cm-light-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
+  "flex h-full w-full flex-col gap-3 rounded-lg border border-line bg-surface p-5 text-left transition-colors hover:border-[color:var(--cm-light-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
 const iconBox = "flex h-10 w-10 items-center justify-center rounded-md";
 const iconBoxStyle = { backgroundColor: "var(--cm-dark-blue)", color: "var(--cm-teal)" };
 
@@ -57,7 +57,7 @@ export function DataSourcePage() {
   return (
     <MonteCarloLayout pageTitle="Data Source" currentStep={1}>
       <h3 className="text-2xl font-semibold">Load sprint history</h3>
-      <p className="mt-2 text-slate-400">Choose where the historical sprint data for the simulation comes from.</p>
+      <p className="mt-2 text-fg-subtle">Choose where the historical sprint data for the simulation comes from.</p>
       <ul className="mt-8 grid gap-4 sm:grid-cols-2">
         <li>
           <button type="button" onClick={() => setOpenModal("ado")} aria-haspopup="dialog" className={cardBase}>
@@ -67,7 +67,7 @@ export function DataSourcePage() {
               </span>
               <span className="text-lg font-semibold">Load from Azure DevOps</span>
             </span>
-            <span className="text-sm text-slate-300">
+            <span className="text-sm text-fg-muted">
               Connect to an Azure DevOps project and load the resolved User Stories and Bugs under an Iteration path.
             </span>
           </button>
@@ -85,7 +85,7 @@ export function DataSourcePage() {
               </span>
               <span className="text-lg font-semibold">Import an Excel file</span>
             </span>
-            <span className="text-sm text-slate-300">Select a sprint history extract (.xlsx), then set the simulation parameters.</span>
+            <span className="text-sm text-fg-muted">Select a sprint history extract (.xlsx), then set the simulation parameters.</span>
           </button>
         </li>
       </ul>

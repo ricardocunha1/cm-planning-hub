@@ -4,12 +4,13 @@ import { deletePlan, listPlans } from "../../lib/releasePlan/planApi";
 import type { PlanListResponse, PlanSummary } from "../../lib/releasePlan/planTypes";
 import { projectLabel } from "../../lib/releasePlan/selectors";
 import { errorMessages, useToast } from "../Toast";
+import { TrashIcon } from "../icons/TrashIcon";
 import { DeletePlanDialog } from "./DeletePlanDialog";
 
 type ListState = { kind: "loading" } | { kind: "error"; messages: string[] } | { kind: "ready"; data: PlanListResponse };
 
 const buttonClass =
-  "rounded border border-slate-600 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
+  "rounded border border-line-bold px-3 py-1.5 text-sm font-medium text-fg-soft hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
 
 const formatDate = (iso: string): string => new Date(iso).toLocaleString();
 
@@ -89,13 +90,13 @@ export function PlanList() {
         Saved release plans
       </h3>
       {state.kind === "loading" && (
-        <p role="status" className="mt-4 text-slate-400">
+        <p role="status" className="mt-4 text-fg-subtle">
           Loading saved release plans…
         </p>
       )}
       {state.kind === "error" && (
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div role="alert" className="text-red-400">
+          <div role="alert" className="text-danger">
             {state.messages.map((message) => (
               <p key={message}>{message}</p>
             ))}
@@ -106,13 +107,13 @@ export function PlanList() {
         </div>
       )}
       {state.kind === "ready" && state.data.items.length === 0 && (
-        <p className="mt-4 text-slate-400">No saved release plans yet. Create one from Azure DevOps.</p>
+        <p className="mt-4 text-fg-subtle">No saved release plans yet. Create one from Azure DevOps.</p>
       )}
       {state.kind === "ready" && state.data.items.length > 0 && (
         <>
-          <div className="mt-4 overflow-x-auto rounded-lg border border-slate-800">
+          <div className="mt-4 overflow-x-auto rounded-lg border border-line">
             <table className="w-full text-left text-sm">
-              <thead className="bg-slate-900 text-slate-400">
+              <thead className="bg-surface text-fg-subtle">
                 <tr>
                   <th scope="col" className="px-4 py-2 font-medium">
                     Name
@@ -121,7 +122,7 @@ export function PlanList() {
                     Project
                   </th>
                   <th scope="col" className="px-4 py-2 font-medium">
-                    Created
+                    Created On
                   </th>
                   <th scope="col" className="px-4 py-2 font-medium">
                     Last modified
@@ -133,7 +134,7 @@ export function PlanList() {
               </thead>
               <tbody>
                 {state.data.items.map((item) => (
-                  <tr key={item.id} className="border-t border-slate-800">
+                  <tr key={item.id} className="border-t border-line">
                     <td className="px-4 py-2">
                       <Link
                         to={`/release-plan/${item.id}`}
@@ -142,12 +143,15 @@ export function PlanList() {
                         {item.name}
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-slate-300">{projectLabel(item.projectType, item.projectName)}</td>
-                    <td className="px-4 py-2 text-slate-300">{formatDate(item.createdAt)}</td>
-                    <td className="px-4 py-2 text-slate-300">{formatDate(item.updatedAt)}</td>
+                    <td className="px-4 py-2 text-fg-muted">{projectLabel(item.projectType, item.projectName)}</td>
+                    <td className="px-4 py-2 text-fg-muted">{formatDate(item.createdAt)}</td>
+                    <td className="px-4 py-2 text-fg-muted">{formatDate(item.updatedAt)}</td>
                     <td className="px-4 py-2 text-right">
-                      <button type="button" aria-label={`Delete ${item.name}`} onClick={() => setPendingDelete(item)} className={buttonClass}>
-                        Delete
+                      <button type="button" aria-label={`Delete ${item.name}`} onClick={() => setPendingDelete(item)}
+                        title="Delete"
+                        className="rounded border border-danger/60 p-1.5 text-danger hover:bg-danger hover:text-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+                      >
+                        <TrashIcon className="h-4 w-4" />
                       </button>
                     </td>
                   </tr>
@@ -156,7 +160,7 @@ export function PlanList() {
             </table>
           </div>
           {state.data.total > state.data.pageSize && (
-            <nav aria-label="Pagination" className="mt-3 flex items-center justify-end gap-3 text-sm text-slate-300">
+            <nav aria-label="Pagination" className="mt-3 flex items-center justify-end gap-3 text-sm text-fg-muted">
               <button type="button" onClick={() => setPage(page - 1)} disabled={page <= 1} className={buttonClass}>
                 Previous
               </button>

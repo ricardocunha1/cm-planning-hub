@@ -14,7 +14,7 @@ import { samplePlan } from "./test/releasePlanFixtures";
 // besides window.scrollTo (ScrollToTop). A "reload" is an unmount + fresh render.
 
 const FLOW_TIMEOUT_MS = 20_000;
-const ACTIVE_CLASSES = ["bg-slate-800", "text-[color:var(--cm-teal)]"];
+const ACTIVE_CLASSES = ["bg-surface-raised", "text-accent-teal"];
 
 function LocationProbe() {
   return <div data-testid="location">{useLocation().pathname}</div>;
@@ -81,7 +81,7 @@ function expectActive(active: string, inactive: string) {
   expect(toolLink(active)).toHaveAttribute("aria-current", "page");
   expect(toolLink(active)).toHaveClass(...ACTIVE_CLASSES);
   expect(toolLink(inactive)).not.toHaveAttribute("aria-current");
-  expect(toolLink(inactive)).not.toHaveClass("bg-slate-800");
+  expect(toolLink(inactive)).not.toHaveClass("bg-surface-raised");
 }
 
 describe("Sidebar collapse – full app", () => {

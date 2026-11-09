@@ -1,7 +1,10 @@
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CONFIDENCE_COLORS, CONFIDENCE_TEXT_COLORS } from "../../lib/monteCarlo/confidence";
+import { applyTheme } from "../../lib/themePreference";
 import { result } from "../../test/monteCarloFixtures";
 import { renderAt } from "../../test/render";
+import { resetTheme } from "../../test/theme";
 import { ResultsPage } from "./ResultsPage";
 
 // Plotly needs a real browser (canvas, WebGL); stub the lazy chart.
@@ -12,6 +15,10 @@ vi.mock("../../components/monteCarlo/HistogramChart", () => ({
 }));
 
 describe("ResultsPage", () => {
+  afterEach(() => {
+    resetTheme();
+  });
+
   it("redirects to the input step without results", () => {
     renderAt("/monte-carlo/results", <ResultsPage />);
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/monte-carlo$/);
@@ -54,6 +61,18 @@ describe("ResultsPage", () => {
     const table = screen.getByRole("columnheader", { name: "Count" }).closest("table")!;
     const bodyRows = within(table).getAllByRole("row").slice(1);
     expect(bodyRows.map((row) => row.textContent)).toEqual(["9600", "10200", "11150", ">5050"]);
+  });
+
+  it.each(["dark", "light"] as const)("colors the card text with the %s text variant and keeps the brand border", (theme) => {
+    applyTheme(theme);
+    renderAt("/monte-carlo/results", <ResultsPage />, {
+      execution: { result, sprintStartDate: "2026-01-05" },
+    });
+    for (const level of [50, 70, 85]) {
+      const card = screen.getByTestId(`card-p${level}`);
+      expect(card).toHaveStyle({ borderTop: `3px solid ${CONFIDENCE_COLORS[level]}` });
+      expect(within(card).getByText(new RegExp(`^P${level} - `))).toHaveStyle({ color: CONFIDENCE_TEXT_COLORS[theme][level] });
+    }
   });
 
 });

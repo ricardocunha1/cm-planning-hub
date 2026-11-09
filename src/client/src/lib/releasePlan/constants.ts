@@ -1,4 +1,5 @@
 /** Constants of the Feature release plan board (ported from the template, see the plan's Template reference). */
+import type { Theme } from "../themePreference";
 
 /** `schema` value of a Feature release plan file; `version` written for new plans. */
 export const SCHEMA = "release-planner-features";
@@ -64,26 +65,63 @@ export const ADO = {
   story: { color: "#009CCC", ink: "#04212e" },
 } as const;
 
+/** Board colors used when drawing outside the DOM (the PNG export). */
+export interface BoardPalette {
+  /** Header strip behind the board name (brand blue in both themes). */
+  readonly navy: string;
+  readonly panel: string;
+  readonly ink: string;
+  readonly muted: string;
+  readonly line: string;
+  readonly bandA: string;
+  readonly bandB: string;
+  readonly bandLine: string;
+  readonly unplanned: string;
+  readonly epicbg: string;
+  readonly gold: string;
+  /** Flag chip text color. */
+  readonly flagInk: string;
+}
+
 /**
- * Dark board palette, for drawing outside the DOM (the PNG export). Mirrors the
- * `--navy`, `--panel`, `--ink`, `--muted`, `--line`, `--band-a`, `--band-b`,
- * `--band-line`, `--unplanned`, `--epicbg` and `--gold` variables at the top of
- * `releasePlan.css`; keep both in sync. `flagInk` is the flag chip text color.
+ * Board palette per theme, for the PNG export. Mirrors the `--navy`, `--panel`,
+ * `--ink`, `--muted`, `--line`, `--band-a`, `--band-b`, `--band-line`,
+ * `--unplanned`, `--epicbg` and `--gold` variables of `.rp` (dark) and
+ * `[data-theme="light"] .rp` (light) in `releasePlan.css`; keep them in sync.
  */
-export const PALETTE = {
-  navy: "#274B76",
-  panel: "#152A47",
-  ink: "#E9EFF7",
-  muted: "#9FB3CC",
-  line: "#2A4A73",
-  bandA: "#12243D",
-  bandB: "#172C4A",
-  bandLine: "#2F5180",
-  unplanned: "#2A2617",
-  epicbg: "rgba(255,255,255,.035)",
-  gold: "#EBC160",
-  flagInk: "#3a2a05",
-} as const;
+export const PALETTES: Readonly<Record<Theme, BoardPalette>> = {
+  dark: {
+    navy: "#274B76",
+    panel: "#152A47",
+    ink: "#E9EFF7",
+    muted: "#9FB3CC",
+    line: "#2A4A73",
+    bandA: "#12243D",
+    bandB: "#172C4A",
+    bandLine: "#2F5180",
+    unplanned: "#2A2617",
+    epicbg: "rgba(255,255,255,.035)",
+    gold: "#EBC160",
+    flagInk: "#3a2a05",
+  },
+  light: {
+    navy: "#274B76",
+    panel: "#FFFFFF",
+    ink: "#1B2B42",
+    muted: "#55667D",
+    line: "#C9D4E2",
+    bandA: "#F7F9FC",
+    bandB: "#EDF2F8",
+    bandLine: "#B8C7DA",
+    unplanned: "#FBF3DC",
+    epicbg: "rgba(39,75,118,.05)",
+    gold: "#EBC160",
+    flagInk: "#3a2a05",
+  },
+};
+
+/** The dark board palette (the original look); same as `PALETTES.dark`. */
+export const PALETTE: BoardPalette = PALETTES.dark;
 
 /** Board geometry, in unscaled px. */
 export const L = {

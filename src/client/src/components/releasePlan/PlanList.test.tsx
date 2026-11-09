@@ -45,7 +45,7 @@ describe("PlanList", () => {
     const table = await screen.findByRole("table");
     const rows = within(table).getAllByRole("row");
     expect(rows).toHaveLength(3);
-    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Name", "Project", "Created", "Last modified", "Actions"]);
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Name", "Project", "Created On", "Last modified", "Actions"]);
     expect(within(rows[1]).getByRole("link", { name: "Plan 1" })).toHaveAttribute("href", "/release-plan/1");
     expect(within(rows[1]).getByText("On Prem · Proj")).toBeInTheDocument();
     expect(within(rows[1]).getByText(new Date("2026-11-01T08:00:00Z").toLocaleString())).toBeInTheDocument();

@@ -8,7 +8,7 @@ import { useToast } from "../components/Toast";
 import type { ReleasePlan } from "../lib/releasePlan/types";
 import { useReleasePlan } from "../releasePlanStore";
 
-const cardBase = "flex h-full w-full flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900 p-5 text-left";
+const cardBase = "flex h-full w-full flex-col gap-3 rounded-lg border border-line bg-surface p-5 text-left";
 
 /**
  * Release Plan entry page (`/release-plan`): the "Create from Azure DevOps"
@@ -53,7 +53,7 @@ export function ReleasePlanHomePage() {
                 </span>
                 <span className="text-lg font-semibold">Create from Azure DevOps</span>
               </span>
-              <span className="text-sm text-slate-300">Connect to an Azure DevOps project and build a board from its Epics and Features.</span>
+              <span className="text-sm text-fg-muted">Connect to an Azure DevOps project and build a board from its Epics and Features.</span>
             </button>
           </li>
         </ul>
