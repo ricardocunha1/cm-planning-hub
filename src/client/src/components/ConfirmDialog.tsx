@@ -51,21 +51,21 @@ export function ConfirmDialog({ open, title, message, confirmLabel, cancelLabel 
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={messageId}
-        className="relative w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 shadow-xl"
+        className="relative w-full max-w-md rounded-lg border border-line-strong bg-surface shadow-xl"
       >
-        <div className="px-6 py-4 border-b border-slate-800">
+        <div className="px-6 py-4 border-b border-line">
           <h2 id={titleId} className="text-lg font-semibold">
             {title}
           </h2>
         </div>
-        <p id={messageId} className="px-6 py-5 text-sm text-slate-300" style={{ whiteSpace: "pre-line" }}>
+        <p id={messageId} className="px-6 py-5 text-sm text-fg-muted" style={{ whiteSpace: "pre-line" }}>
           {message}
         </p>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-800">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-line">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
+            className="rounded border border-line-bold px-4 py-2 text-sm font-medium text-fg-soft hover:bg-surface-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
           >
             {cancelLabel}
           </button>
@@ -73,7 +73,7 @@ export function ConfirmDialog({ open, title, message, confirmLabel, cancelLabel 
             ref={confirmRef}
             type="button"
             onClick={onConfirm}
-            className="rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+            className="rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
             style={{ backgroundColor: "var(--cm-light-blue)" }}
           >
             {confirmLabel}

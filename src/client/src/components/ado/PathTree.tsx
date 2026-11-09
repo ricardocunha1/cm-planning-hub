@@ -135,12 +135,12 @@ export function PathTree({
         onChange={onSearch}
         disabled={disabled}
         placeholder="Search paths…"
-        className="block w-full rounded border border-slate-600 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
+        className="block w-full rounded border border-line-bold bg-canvas px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
       />
       {rows.length === 0 ? (
-        <p className="text-slate-400">No matching paths.</p>
+        <p className="text-fg-subtle">No matching paths.</p>
       ) : (
-        <ul role="tree" aria-label={label} aria-disabled={disabled ? true : undefined} className={`max-h-64 overflow-auto rounded border border-slate-700 bg-slate-950 py-1${disabled ? " opacity-60" : ""}`}>
+        <ul role="tree" aria-label={label} aria-disabled={disabled ? true : undefined} className={`max-h-64 overflow-auto rounded border border-line-strong bg-canvas py-1${disabled ? " opacity-60" : ""}`}>
           {rows.map((row) => {
             const { node } = row;
             const selected = node.path === selectedPath;
@@ -169,7 +169,7 @@ export function PathTree({
                 }}
                 onKeyDown={(event) => onKeyDown(event, row)}
                 className={`flex cursor-pointer items-center gap-1 py-1 pr-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cm-light-blue)] ${
-                  selected ? "bg-[color:var(--cm-light-blue)] text-white" : "text-slate-200 hover:bg-slate-800"
+                  selected ? "bg-[color:var(--cm-light-blue)] text-white" : "text-fg-soft hover:bg-surface-raised"
                 }`}
                 style={{ paddingLeft: `${(row.level - 1) * 1.25 + 0.5}rem` }}
               >
@@ -187,12 +187,12 @@ export function PathTree({
                       }
                     }
                   }}
-                  className="inline-flex w-4 justify-center text-slate-400"
+                  className="inline-flex w-4 justify-center text-fg-subtle"
                 >
                   {row.hasChildren ? (row.expanded ? "▾" : "▸") : ""}
                 </span>
                 <span className="truncate">{node.name}</span>
-                {node.finishDate ? <span className={`ml-auto pl-2 text-xs ${selected ? "text-white/80" : "text-slate-400"}`}>{node.finishDate}</span> : null}
+                {node.finishDate ? <span className={`ml-auto pl-2 text-xs ${selected ? "text-white/80" : "text-fg-subtle"}`}>{node.finishDate}</span> : null}
               </li>
             );
           })}

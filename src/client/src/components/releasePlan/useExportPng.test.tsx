@@ -1,7 +1,10 @@
 import { act, renderHook, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PALETTES } from "../../lib/releasePlan/constants";
 import { PNG_HEAD } from "../../lib/releasePlan/png";
+import { applyTheme } from "../../lib/themePreference";
+import { resetTheme } from "../../test/theme";
 import { computeFlippedLayout, computeLayout } from "../../lib/releasePlan/layout";
 import type { ReleasePlan } from "../../lib/releasePlan/types";
 import { FakeImage, RecordingContext, stubCanvas } from "../../test/canvas";
@@ -51,6 +54,7 @@ describe("useExportPng", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     FakeImage.reset();
+    resetTheme();
   });
 
   it("draws the board at scale 2 with the logo, downloads <base>.png and toasts", async () => {
@@ -87,6 +91,19 @@ describe("useExportPng", () => {
     expect(canvases[0].width).toBe(layout.width * 2);
     expect(canvases[0].height).toBe((layout.height + PNG_HEAD) * 2);
     expect(ctx.ops("fillRect")).toContainEqual(expect.objectContaining({ args: [0, layout.headH, layout.width, 1] }));
+    expect(downloads).toEqual(["Sample_Release_Plan_2026-10-21.png"]);
+  });
+
+  it.each(["dark", "light"] as const)("draws with the %s palette in the %s theme", async (theme) => {
+    applyTheme(theme);
+    const ctx = new RecordingContext();
+    stubCanvas({ context: ctx, blob: PNG });
+    const plan = samplePlan();
+    const { result } = setup(plan);
+    await act(() => result.current.exportPng());
+    const layout = computeLayout(plan);
+    expect(ctx.ops("fillRect")[0]).toMatchObject({ args: [0, 0, layout.width, layout.height + PNG_HEAD], fillStyle: PALETTES[theme].panel });
+    expect(ctx.ops("fillRect")).toContainEqual(expect.objectContaining({ fillStyle: PALETTES[theme].bandA }));
     expect(downloads).toEqual(["Sample_Release_Plan_2026-10-21.png"]);
   });
 

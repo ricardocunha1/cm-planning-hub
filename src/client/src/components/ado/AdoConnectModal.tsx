@@ -38,9 +38,9 @@ const SCOPE_LABELS: Readonly<Record<AdoScopeType, string>> = {
 };
 
 const inputClass =
-  "block w-full rounded border border-slate-600 bg-slate-950 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
+  "block w-full rounded border border-line-bold bg-canvas px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
 const primaryButton =
-  "rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900";
+  "rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-surface";
 
 /** A connection field that can be invalid before any request. */
 type ConnectionField = "source" | "url" | "pat";
@@ -225,9 +225,9 @@ function AdoConnectDialog<T>({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative flex max-h-full w-full max-w-2xl flex-col rounded-lg border border-slate-700 bg-slate-900 shadow-xl"
+        className="relative flex max-h-full w-full max-w-2xl flex-col rounded-lg border border-line-strong bg-surface shadow-xl"
       >
-        <div className="px-6 py-4 border-b border-slate-800">
+        <div className="px-6 py-4 border-b border-line">
           <h2 id={titleId} className="text-lg font-semibold">
             {title}
           </h2>
@@ -235,10 +235,10 @@ function AdoConnectDialog<T>({
         <div className="space-y-4 overflow-y-auto px-6 py-5 text-sm">
           <form onSubmit={(event) => void onConnect(event)} noValidate className="space-y-4">
             <fieldset aria-describedby={errors.fields.has("source") ? errorId : undefined}>
-              <legend className="mb-1 font-medium text-slate-200">Azure DevOps source</legend>
+              <legend className="mb-1 font-medium text-fg-soft">Azure DevOps source</legend>
               <div className="flex flex-wrap gap-4">
                 {SOURCES.map((value) => (
-                  <label key={value} className="flex items-center gap-2 text-slate-200">
+                  <label key={value} className="flex items-center gap-2 text-fg-soft">
                     <input
                       type="radio"
                       name="ado-source"
@@ -256,7 +256,7 @@ function AdoConnectDialog<T>({
               </div>
             </fieldset>
             <div className="space-y-1">
-              <label htmlFor={urlId} className="block font-medium text-slate-200">
+              <label htmlFor={urlId} className="block font-medium text-fg-soft">
                 Project URL
               </label>
               <input
@@ -274,7 +274,7 @@ function AdoConnectDialog<T>({
               />
             </div>
             <div className="space-y-1">
-              <label htmlFor={patId} className="block font-medium text-slate-200">
+              <label htmlFor={patId} className="block font-medium text-fg-soft">
                 Personal Access Token
               </label>
               <input
@@ -292,7 +292,7 @@ function AdoConnectDialog<T>({
                 {...invalidProps("pat", patHelpId)}
                 className={inputClass}
               />
-              <p id={patHelpId} className="text-xs text-slate-400">
+              <p id={patHelpId} className="text-xs text-fg-subtle">
                 Needs the Work Items (Read) scope. It is sent only to connect and is never stored.
               </p>
             </div>
@@ -301,18 +301,18 @@ function AdoConnectDialog<T>({
                 {busy === "connect" ? "Connecting…" : "Connect"}
               </button>
               {connected && (
-                <p className="text-slate-300">
-                  Connected to <span className="font-medium text-slate-100">{connected.response.project.name}</span>.
+                <p className="text-fg-muted">
+                  Connected to <span className="font-medium text-fg">{connected.response.project.name}</span>.
                 </p>
               )}
             </div>
           </form>
           {connected && tree && (
-            <section aria-label="Choose a path" aria-busy={busy !== null} className="space-y-3 border-t border-slate-800 pt-4">
+            <section aria-label="Choose a path" aria-busy={busy !== null} className="space-y-3 border-t border-line pt-4">
               {scopeTypes.length > 1 && (
                 <div role="radiogroup" aria-label="Path type" aria-disabled={busy !== null ? true : undefined} className="flex flex-wrap gap-4">
                   {scopeTypes.map((value) => (
-                    <label key={value} className="flex items-center gap-2 text-slate-200">
+                    <label key={value} className="flex items-center gap-2 text-fg-soft">
                       <input
                         type="radio"
                         name="ado-scope-type"
@@ -339,10 +339,10 @@ function AdoConnectDialog<T>({
                 onSelect={setScopePath}
                 disabled={busy !== null}
               />
-              <p className="text-slate-400" data-testid="ado-selected-path">
+              <p className="text-fg-subtle" data-testid="ado-selected-path">
                 {scopePath !== null ? (
                   <>
-                    Selected: <span className="font-medium text-slate-200">{scopePath}</span>
+                    Selected: <span className="font-medium text-fg-soft">{scopePath}</span>
                   </>
                 ) : (
                   `Select an ${scopeType === "area" ? "Area" : "Iteration"} path (child paths are included).`
@@ -351,18 +351,18 @@ function AdoConnectDialog<T>({
             </section>
           )}
           {hasErrors && (
-            <div id={errorId} role="alert" className="space-y-1 text-red-400">
+            <div id={errorId} role="alert" className="space-y-1 text-danger">
               {errors.messages.map((message) => (
                 <p key={message}>{message}</p>
               ))}
             </div>
           )}
         </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-800">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-line">
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
+            className="rounded border border-line-bold px-4 py-2 text-sm font-medium text-fg-soft hover:bg-surface-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]"
           >
             Cancel
           </button>

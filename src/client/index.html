@@ -5,8 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/cmlogo.png" />
     <title>Planning Hub</title>
+    <script>
+      // Apply the theme before the first paint (no flash). Mirrors resolveTheme/applyTheme in
+      // src/lib/themePreference.ts: the stored explicit choice wins, else the OS preference (default dark).
+      (function () {
+        var theme = null;
+        try {
+          var stored = window.localStorage.getItem("cmPlanningHub.theme.v1");
+          if (stored === "light" || stored === "dark") {
+            theme = stored;
+          }
+        } catch (e) {
+          // Storage unavailable: fall through to the OS preference.
+        }
+        if (theme === null) {
+          theme = "dark";
+          try {
+            if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+              theme = "light";
+            }
+          } catch (e) {
+            // matchMedia unavailable: keep the dark default.
+          }
+        }
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
   </head>
-  <body class="min-h-screen bg-slate-950 text-slate-100">
+  <body class="min-h-screen bg-canvas text-fg">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

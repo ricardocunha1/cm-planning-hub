@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* CM brand colors, copied from the former Flask app's base.html template. */
+/* CM brand colors, copied from the former Flask app's base.html template. Same in both themes. */
 :root {
   --cm-dark-blue: #274B76;
   --cm-light-blue: #4E98D1;
@@ -11,4 +11,51 @@
   --cm-orange: #D8804B;
   --cm-red: #B64234;
   --cm-purple: #802D6C;
+}
+
+/*
+ * Theme-aware neutrals as space-separated RGB channels (used through tailwind.config.js as
+ * `rgb(var(--ui-*) / <alpha-value>)`). The dark values are the Tailwind slate shades the app
+ * originally hard-coded (noted per line), so the dark theme looks exactly as before.
+ * `data-theme` is set on <html> by the script in index.html; dark is also the fallback.
+ */
+:root,
+[data-theme="dark"] {
+  --ui-canvas: 2 6 23;            /* slate-950: page background, inputs */
+  --ui-surface: 15 23 42;         /* slate-900: panels, cards, dialogs */
+  --ui-surface-raised: 30 41 59;  /* slate-800: hover/active rows, chips */
+  --ui-surface-overlay: 51 65 85; /* slate-700: toggles, file buttons */
+  --ui-surface-strong: 71 85 105; /* slate-600: hover on overlay */
+  --ui-line: 30 41 59;            /* slate-800 */
+  --ui-line-strong: 51 65 85;     /* slate-700 */
+  --ui-line-bold: 71 85 105;      /* slate-600 */
+  --ui-fg: 241 245 249;           /* slate-100: body text */
+  --ui-fg-soft: 226 232 240;      /* slate-200 */
+  --ui-fg-muted: 203 213 225;     /* slate-300 */
+  --ui-fg-subtle: 148 163 184;    /* slate-400: secondary text */
+  --ui-fg-faint: 100 116 139;     /* slate-500: placeholders, hints */
+  --ui-fg-dim: 71 85 105;         /* slate-600: disabled text */
+  --ui-accent-blue: 78 152 209;   /* --cm-light-blue */
+  --ui-accent-teal: 96 197 181;   /* --cm-teal */
+  --ui-danger: 248 113 113;       /* red-400: inline error text */
+}
+
+[data-theme="light"] {
+  --ui-canvas: 241 245 249;           /* slate-100 */
+  --ui-surface: 255 255 255;          /* white */
+  --ui-surface-raised: 226 232 240;   /* slate-200 */
+  --ui-surface-overlay: 203 213 225;  /* slate-300 */
+  --ui-surface-strong: 148 163 184;   /* slate-400 */
+  --ui-line: 226 232 240;             /* slate-200 */
+  --ui-line-strong: 203 213 225;      /* slate-300 */
+  --ui-line-bold: 148 163 184;        /* slate-400 */
+  --ui-fg: 15 23 42;                  /* slate-900 */
+  --ui-fg-soft: 30 41 59;             /* slate-800 */
+  --ui-fg-muted: 51 65 85;            /* slate-700 */
+  --ui-fg-subtle: 71 85 105;          /* slate-600 */
+  --ui-fg-faint: 91 107 128;          /* #5B6B80: 4.97:1 on canvas */
+  --ui-fg-dim: 115 131 154;           /* #73839A: de-emphasised, 3.4:1 on raised/60 */
+  --ui-accent-blue: 31 104 160;       /* darker --cm-light-blue, readable on white */
+  --ui-accent-teal: 22 110 96;        /* darker --cm-teal, readable on slate-200 */
+  --ui-danger: 185 28 28;             /* red-700 */
 }

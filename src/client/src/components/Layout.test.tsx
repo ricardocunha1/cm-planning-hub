@@ -1,8 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 import { SIDEBAR_COLLAPSED_KEY } from "../lib/sidebarPreference";
+import { applyTheme, THEME_KEY } from "../lib/themePreference";
+import { resetTheme } from "../test/theme";
 import { Layout } from "./Layout";
 
 function renderLayout(path = "/monte-carlo") {
@@ -24,7 +26,7 @@ function sidebarAside(): HTMLElement {
 }
 
 afterEach(() => {
-  window.localStorage.clear();
+  resetTheme();
 });
 
 describe("Layout sidebar collapse", () => {
@@ -48,6 +50,17 @@ describe("Layout sidebar collapse", () => {
     expect(screen.getByRole("button", { name: "Collapse sidebar" })).toHaveAttribute("aria-expanded", "true");
     expect(sidebarAside()).toHaveClass("md:w-60");
     expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)).toBe("0");
+  });
+
+  it("shows the theme toggle in the header and switches the theme", async () => {
+    applyTheme("dark");
+    renderLayout();
+    const header = screen.getByRole("banner");
+    const toggle = within(header).getByRole("button", { name: "Switch to light theme" });
+    await userEvent.click(toggle);
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    expect(window.localStorage.getItem(THEME_KEY)).toBe("light");
+    expect(within(header).getByRole("button", { name: "Switch to dark theme" })).toBeInTheDocument();
   });
 
   it("restores the collapsed preference from localStorage", () => {

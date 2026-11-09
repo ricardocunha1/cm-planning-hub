@@ -1,7 +1,8 @@
-/* Release Plan board: port of the template CSS, dark palette only.
-   Every selector is scoped under .rp so nothing leaks into the hub. */
+/* Release Plan board: port of the template CSS. The palette below is the dark theme; the light theme
+   overrides it under [data-theme="light"] .rp (end of the variables). Every selector is scoped under .rp
+   so nothing leaks into the hub. */
 
-/* Palette values used by the PNG export are mirrored in PALETTE (lib/releasePlan/constants.ts): keep in sync. */
+/* Palette values used by the PNG export are mirrored in PALETTES (lib/releasePlan/constants.ts): keep in sync. */
 .rp {
   --navy: #274B76; --midblue: #0362A4; --sky: #4E98D1; --teal: #60C5B5; --gold: #EBC160;
   --orange: #D8804B; --red: #B64234; --purple: #802D6C;
@@ -11,9 +12,19 @@
   --epicbg: rgba(255,255,255,.035); --accent: #4E98D1; --link: #4E98D1;
   --row-epic: rgba(255,123,0,.12); --row-feat: rgba(119,59,147,.16);
   --hover: rgba(255,255,255,.06); --input: #0F2036; --shadow: 0 1px 3px rgba(0,0,0,.45);
+  --sel-bg: var(--ink); --sel-ink: var(--navy); --date-scheme: dark; --drop-gold: var(--gold);
   --font: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
   color: var(--ink);
   font: 14px/1.35 var(--font);
+}
+/* Light theme: neutral surfaces, text and lines only; brand and work item colors stay the same. */
+[data-theme="light"] .rp {
+  --bg: #F1F5F9; --panel: #FFFFFF; --panel2: #EEF2F7; --ink: #1B2B42; --muted: #55667D; --line: #C9D4E2;
+  --band-a: #F7F9FC; --band-b: #EDF2F8; --band-line: #B8C7DA; --unplanned: #FBF3DC;
+  --epicbg: rgba(39,75,118,.05); --link: #1F68A0;
+  --row-epic: rgba(255,123,0,.10); --row-feat: rgba(119,59,147,.10);
+  --hover: rgba(15,32,54,.06); --input: #F5F8FC; --shadow: 0 1px 3px rgba(15,32,54,.25);
+  --sel-bg: var(--navy); --sel-ink: #fff; --date-scheme: light; --drop-gold: #A87A12;
 }
 .rp *, .rp *::before, .rp *::after { box-sizing: border-box; }
 .rp button, .rp input, .rp select { font: inherit; color: inherit; }
@@ -29,7 +40,7 @@
 .rp .tabs { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .rp .tabs button { border: 0; background: transparent; color: var(--ink); padding: 6px 14px; cursor: pointer; }
 .rp .tabs button:hover { background: var(--hover); }
-.rp .tabs button[aria-selected=true], .rp .modes button[aria-checked=true] { background: var(--ink); color: var(--navy); font-weight: 600; }
+.rp .tabs button[aria-selected=true], .rp .modes button[aria-checked=true] { background: var(--sel-bg); color: var(--sel-ink); font-weight: 600; }
 .rp .modes { align-items: stretch; }
 .rp .modes .lbl { display: flex; align-items: center; padding: 0 8px 0 10px; font-size: 12px; color: var(--muted); border-right: 1px solid var(--line); }
 .rp .modes button { display: flex; align-items: center; gap: 6px; }
@@ -47,7 +58,7 @@
 /* "Flip board" toggle: decorated like .withIcon, filled light while pressed (like the selected tabs) */
 .rp .btn.flipBtn { display: inline-flex; align-items: center; gap: 6px; }
 .rp .btn.flipBtn .btnIcon { width: 15px; height: 15px; flex: none; }
-.rp .btn.flipBtn[aria-pressed=true] { background: var(--ink); color: var(--navy); border-color: var(--ink); font-weight: 600; }
+.rp .btn.flipBtn[aria-pressed=true] { background: var(--sel-bg); color: var(--sel-ink); border-color: var(--sel-bg); font-weight: 600; }
 
 /* ---------- summary ---------- */
 .rp .summary { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
@@ -71,8 +82,11 @@
 .rp .tsize.none { background: rgba(255,255,255,.3); color: #fff; }
 .rp td .tsize, .rp .wi-meta .tsize, .rp .wi-children .tsize { background: var(--feature); color: #fff; }
 .rp td .tsize.none, .rp .wi-meta .tsize.none, .rp .wi-children .tsize.none { background: transparent; color: var(--muted); border: 1px dashed var(--line); }
-.rp .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid currentColor; }
+/* Milestone chips get their color as --chip-c (MilestoneChip); light mode darkens the text for contrast. */
+.rp .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid currentColor; color: var(--chip-c); }
 .rp .chip.none { color: var(--gold); }
+[data-theme="light"] .rp .chip { color: color-mix(in srgb, var(--chip-c) 55%, #000); }
+[data-theme="light"] .rp .chip.none { color: #8A6514; border-color: var(--gold); background: rgba(235,193,96,.18); }
 .rp .flagchip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; background: var(--gold); color: #3a2a05; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .rp .typ { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; margin-right: 6px; vertical-align: 1px; letter-spacing: .02em; }
 .rp .typ.e { background: var(--epic); color: var(--epic-ink); }
@@ -97,7 +111,7 @@
 .rp .mslabel b { color: var(--ink); }
 .rp .mslabel input[type=text] { font-weight: 650; border: 1px solid transparent; border-radius: 4px; padding: 2px 4px; background: transparent; width: 100%; }
 .rp .mslabel input[type=text]:hover, .rp .mslabel input[type=text]:focus { border-color: var(--line); background: var(--input); outline: none; }
-.rp .mslabel input[type=date] { border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: 12px; color: var(--muted); padding: 1px 3px; color-scheme: dark; }
+.rp .mslabel input[type=date] { border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: 12px; color: var(--muted); padding: 1px 3px; color-scheme: var(--date-scheme); }
 .rp .mslabel input[type=date]:hover { border-color: var(--line); background: var(--input); }
 .rp .mslabel .stats { font-size: 12px; color: var(--muted); }
 .rp .mslabel .szchips { margin: 1px 0; }
@@ -125,8 +139,8 @@
 .rp .cell.valid { background: rgba(78,152,209,.10); outline: 2px dashed rgba(78,152,209,.6); outline-offset: -2px; }
 .rp .cell.over { background: rgba(78,152,209,.25); }
 .rp .cell.invalid { opacity: .4; }
-.rp .cell.dropL { box-shadow: inset 4px 0 0 var(--gold); }
-.rp .cell.dropR { box-shadow: inset -4px 0 0 var(--gold); }
+.rp .cell.dropL { box-shadow: inset 4px 0 0 var(--drop-gold); }
+.rp .cell.dropR { box-shadow: inset -4px 0 0 var(--drop-gold); }
 
 .rp .card { border-radius: 4px; padding: 6px 7px; box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
 .rp .card .id { font-size: 10.5px; display: flex; justify-content: space-between; gap: 4px; align-items: center; }
@@ -136,7 +150,7 @@
 .rp .feature .t { font-weight: 600; -webkit-line-clamp: 2; }
 .rp .fcard { position: relative; flex: none; }
 .rp .fcard.dragging { opacity: .35; }
-.rp .fcard.selected { outline: 3px solid var(--gold); outline-offset: 1px; }
+.rp .fcard.selected { outline: 3px solid var(--drop-gold); outline-offset: 1px; }
 .rp .fcard .chk { display: none; position: absolute; right: 5px; bottom: 4px; font-weight: 700; font-size: 12px; color: #3a2a05; background: var(--gold); border-radius: 50%; width: 16px; height: 16px; line-height: 16px; text-align: center; }
 .rp .fcard.selected .chk { display: block; }
 
@@ -172,8 +186,8 @@
 .rp .epic.flip .name > span:first-child { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .rp .epic.dropT { box-shadow: 0 -5px 0 var(--sky); }
 .rp .epic.dropB { box-shadow: 0 5px 0 var(--sky); }
-.rp .cell.dropT { box-shadow: inset 0 4px 0 var(--gold); }
-.rp .cell.dropB { box-shadow: inset 0 -4px 0 var(--gold); }
+.rp .cell.dropT { box-shadow: inset 0 4px 0 var(--drop-gold); }
+.rp .cell.dropB { box-shadow: inset 0 -4px 0 var(--drop-gold); }
 .rp .flagcol { background: repeating-linear-gradient(180deg, var(--gold) 0 14px, transparent 14px 20px) center/3px 100% no-repeat; pointer-events: none; }
 .rp .flagtag.vert { left: 50%; transform: translateX(-50%) rotate(180deg); writing-mode: vertical-rl; padding: 8px 2px; }
 .rp .flaglbl.flip { transform: rotate(-90deg); border-radius: 6px 0 0 6px; }

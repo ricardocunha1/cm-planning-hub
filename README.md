@@ -23,6 +23,11 @@ sidebar, and a main content area.
   holds the **Monte Carlo** item (dice icon) and the "Planning" group
   holds the **Release Plan** item (roadmap icon); each is highlighted on
   every page of its tool.
+- **Theme** — the sun/moon button at the top right of the header switches
+  between the light and dark themes. On the first visit the theme follows
+  the operating system setting; once you pick one it is remembered in the
+  browser. The Monte Carlo histogram and the Release Plan PNG export follow
+  the active theme.
 - **Home page** — a section per category with a card per tool with a short description
   and its goal; click a card to open the tool. Unknown URLs land here.
 - **Monte Carlo (`/monte-carlo`)** — the entry page lets you choose how
