@@ -1,10 +1,15 @@
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation, type RouteObject } from "react-router-dom";
+import { AuthProvider } from "../authStore";
+import type { AuthUser } from "../lib/auth/types";
 import { ToastProvider } from "../components/Toast";
 import type { ReleasePlan } from "../lib/releasePlan/types";
 import { ReleasePlanProvider } from "../releasePlanStore";
+import type { AdoCredential } from "../lib/settings/types";
+import { SettingsProvider } from "../settingsStore";
 import { ForecastProvider, type Execution } from "../monteCarloStore";
+import { TEST_USER } from "./authFixtures";
 import type { DataSource, ValidateResponse } from "../lib/monteCarlo/types";
 
 /** Renders the current pathname as `data-testid="location"`. */
@@ -26,7 +31,8 @@ export function ProbeLayout() {
 /** Renders `element` at `path` (a route pattern; `initialEntry` is the URL to open, default `path`) with stub pages for the other routes, so a
  * navigation shows up as `location` changing. Uses a memory *data* router, so `useBlocker` works. The Monte Carlo store starts
  * from `dataSource` / `validation` / `execution` (default none). The Release Plan store starts
- * from `initialPlan` (default none) saved as `initialPlanId` (default none). */
+ * from `initialPlan` (default none) saved as `initialPlanId` (default none). The settings store starts empty and unfetched, or loaded with `initialCredentials`. The auth store starts signed in as
+ * `TEST_USER`; pass `initialUser: null` for an anonymous visitor (no `/api/auth/me` request is made). */
 export function renderAt(
   path: string,
   element: ReactElement,
@@ -38,6 +44,8 @@ export function renderAt(
     initialPlan = null,
     initialPlanId = null,
     initialEntry = path,
+    initialUser = TEST_USER,
+    initialCredentials,
   }: {
     dataSource?: DataSource | null;
     validation?: ValidateResponse | null;
@@ -46,9 +54,12 @@ export function renderAt(
     initialPlan?: ReleasePlan | null;
     initialPlanId?: number | null;
     initialEntry?: string;
+    initialUser?: AuthUser | null;
+    initialCredentials?: AdoCredential[];
   } = {},
 ) {
   const stubs: Record<string, ReactElement> = {
+    "/login": <p>login page</p>,
     "/": <p>hub home page</p>,
     "/monte-carlo": <p>data source page</p>,
     "/monte-carlo/input": <p>input page</p>,
@@ -63,11 +74,15 @@ export function renderAt(
   const router = createMemoryRouter([{ element: <ProbeLayout />, children }], { initialEntries: [initialEntry] });
   return render(
     <ToastProvider>
-      <ForecastProvider initialDataSource={dataSource} initialValidation={validation} initialExecution={execution}>
-        <ReleasePlanProvider initialPlan={initialPlan} initialPlanId={initialPlanId}>
-          <RouterProvider router={router} />
-        </ReleasePlanProvider>
-      </ForecastProvider>
+      <AuthProvider initialUser={initialUser}>
+        <SettingsProvider initialItems={initialCredentials}>
+          <ForecastProvider initialDataSource={dataSource} initialValidation={validation} initialExecution={execution}>
+            <ReleasePlanProvider initialPlan={initialPlan} initialPlanId={initialPlanId}>
+              <RouterProvider router={router} />
+            </ReleasePlanProvider>
+          </ForecastProvider>
+        </SettingsProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

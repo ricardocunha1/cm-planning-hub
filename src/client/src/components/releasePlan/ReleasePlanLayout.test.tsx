@@ -2,14 +2,17 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { ReleasePlanLayout } from "./ReleasePlanLayout";
+import { SignedIn } from "../../test/SignedIn";
 
 function renderView(page?: string) {
   render(
-    <MemoryRouter initialEntries={["/release-plan"]}>
-      <ReleasePlanLayout page={page}>
-        <p>page content</p>
-      </ReleasePlanLayout>
-    </MemoryRouter>,
+    <SignedIn>
+      <MemoryRouter initialEntries={["/release-plan"]}>
+        <ReleasePlanLayout page={page}>
+          <p>page content</p>
+        </ReleasePlanLayout>
+      </MemoryRouter>
+    </SignedIn>,
   );
 }
 

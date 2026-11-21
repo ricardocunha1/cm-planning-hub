@@ -6,6 +6,8 @@ import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import { ForecastProvider } from "./monteCarloStore";
 import { result, validation } from "./test/monteCarloFixtures";
+import { AuthProvider } from "./authStore";
+import { TEST_USER } from "./test/authFixtures";
 
 // Full-app integration for the Import Excel modal on the Monte Carlo data
 // source page and the data source card on the input form: real routes, pages,
@@ -47,9 +49,11 @@ function renderApp(path = "/monte-carlo") {
   );
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

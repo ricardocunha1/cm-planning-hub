@@ -12,6 +12,8 @@ import { makeBacklog, makeConnectResponse } from "./test/adoFixtures";
 import { makeSprintHistory } from "./test/monteCarloFixtures";
 import { planDetail } from "./test/planServer";
 import { samplePlan } from "./test/releasePlanFixtures";
+import { AuthProvider } from "./authStore";
+import { TEST_USER } from "./test/authFixtures";
 
 // QA full-app integration for "Collaboration Hub selected by default" in the
 // shared AdoConnectModal (Monte Carlo load + Release Plan create; Release Plan
@@ -39,9 +41,11 @@ function renderApp(path: string) {
   );
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

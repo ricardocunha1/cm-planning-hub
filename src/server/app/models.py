@@ -28,3 +28,18 @@ class ReleasePlanRow(Base):
     __table_args__ = (
         Index("ix_release_plans_updated_at_id", text("updated_at DESC"), text("id DESC")),
     )
+
+
+class User(Base):
+    """A signed-in Google account (table `users`), upserted by `sub` (the
+    stable Google subject id) at every login."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sub: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    picture_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    last_login_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())

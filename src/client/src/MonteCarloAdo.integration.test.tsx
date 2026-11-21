@@ -9,6 +9,8 @@ import { ADO_CONNECTION_KEY as RELEASE_PLAN_KEY } from "./lib/releasePlan/consta
 import { ForecastProvider } from "./monteCarloStore";
 import { makeConnectResponse } from "./test/adoFixtures";
 import { makeSprintHistory, result, validation } from "./test/monteCarloFixtures";
+import { AuthProvider } from "./authStore";
+import { TEST_USER } from "./test/authFixtures";
 
 // QA full-app integration for the Monte Carlo "Load from Azure DevOps" data
 // source: real routes, pages, stores, modals and api.ts; only `fetch` (at the
@@ -46,9 +48,11 @@ function renderApp(path = "/monte-carlo") {
   );
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

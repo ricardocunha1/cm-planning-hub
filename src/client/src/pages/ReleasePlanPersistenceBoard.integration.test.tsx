@@ -14,6 +14,8 @@ import { ToastProvider } from "../components/Toast";
 import { ForecastProvider } from "../monteCarloStore";
 import { ProbeLayout } from "../test/render";
 import { renderApp } from "../test/renderApp";
+import { AuthProvider } from "../authStore";
+import { TEST_USER } from "../test/authFixtures";
 
 const TIMEOUT = 40_000;
 const FIND = { timeout: 8_000 };
@@ -419,9 +421,11 @@ describe("Release Plan – board persistence (integration)", { timeout: TIMEOUT 
     render(
       <StrictMode>
         <ToastProvider>
-          <ForecastProvider>
-            <RouterProvider router={router} />
-          </ForecastProvider>
+          <AuthProvider initialUser={TEST_USER}>
+            <ForecastProvider>
+              <RouterProvider router={router} />
+            </ForecastProvider>
+          </AuthProvider>
         </ToastProvider>
       </StrictMode>,
     );

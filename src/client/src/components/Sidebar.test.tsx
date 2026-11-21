@@ -1,14 +1,19 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { TEST_USER } from "../test/authFixtures";
+import type { AuthUser } from "../lib/auth/types";
 import { Sidebar, type SidebarProps } from "./Sidebar";
+import { SignedIn } from "../test/SignedIn";
 
-function renderSidebar(path: string, props: SidebarProps = {}) {
+function renderSidebar(path: string, props: SidebarProps = {}, user: AuthUser | null = TEST_USER) {
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <Sidebar {...props} />
-    </MemoryRouter>,
+    <SignedIn user={user}>
+      <MemoryRouter initialEntries={[path]}>
+        <Sidebar {...props} />
+      </MemoryRouter>
+    </SignedIn>,
   );
 }
 
@@ -119,6 +124,82 @@ describe("Sidebar", () => {
       const inactiveLink = screen.getByRole("link", { name: inactive });
       expect(inactiveLink).not.toHaveAttribute("aria-current");
       expect(inactiveLink).not.toHaveClass("bg-surface-raised");
+    });
+  });
+
+  describe("user footer", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("shows the user's name visibly with an initial avatar and a sign-out button when expanded", () => {
+      renderSidebar("/", { onToggleCollapsed: vi.fn() });
+      const footer = screen.getByTestId("sidebar-footer");
+      expect(within(footer).getByText("Test User")).not.toHaveClass("md:sr-only");
+      expect(within(footer).getByText("T")).toBeInTheDocument();
+      expect(within(footer).getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+      expect(footer).toHaveClass("mt-auto");
+    });
+
+    it("shows the profile picture instead of the initial when there is one", () => {
+      renderSidebar("/", {}, { ...TEST_USER, pictureUrl: "https://example.com/me.png" });
+      const footer = screen.getByTestId("sidebar-footer");
+      expect(footer.querySelector("img")).toHaveAttribute("src", "https://example.com/me.png");
+      expect(within(footer).queryByText("T")).not.toBeInTheDocument();
+    });
+
+    it("keeps the name accessible and as a tooltip, and the sign-out button, when collapsed", () => {
+      renderSidebar("/", { collapsed: true });
+      const footer = screen.getByTestId("sidebar-footer");
+      expect(within(footer).getByText("Test User")).toHaveClass("md:sr-only");
+      expect(footer.querySelector('[title="Test User"]')).not.toBeNull();
+      expect(within(footer).getByRole("button", { name: "Sign out" })).toHaveAttribute("title", "Sign out");
+    });
+
+    it("has a Settings button next to Sign out that opens the settings modal", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+      renderSidebar("/");
+      const footer = screen.getByTestId("sidebar-footer");
+      const settings = within(footer).getByRole("button", { name: "Settings" });
+      expect(settings).toHaveAttribute("title", "Settings");
+      expect(fetchMock).not.toHaveBeenCalled();
+      await userEvent.click(settings);
+      expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+      expect(await screen.findByText("No saved projects yet.")).toBeInTheDocument();
+      expect(fetchMock.mock.calls[0][0]).toBe("/api/settings/ado-credentials");
+      await userEvent.click(screen.getByRole("button", { name: "Close" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("keeps the Settings and Sign out buttons stacked and reachable when collapsed", () => {
+      renderSidebar("/", { collapsed: true });
+      const footer = screen.getByTestId("sidebar-footer");
+      const settings = within(footer).getByRole("button", { name: "Settings" });
+      expect(settings).toHaveAttribute("title", "Settings");
+      expect(settings.parentElement).toHaveClass("md:flex-col");
+      expect(settings.parentElement).toContainElement(within(footer).getByRole("button", { name: "Sign out" }));
+    });
+
+    it("renders no footer without a user", () => {
+      renderSidebar("/", {}, null);
+      expect(screen.queryByTestId("sidebar-footer")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+    });
+
+    it("signs out through POST /api/auth/logout and drops the footer", async () => {
+      const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+      vi.stubGlobal("fetch", fetchMock);
+      renderSidebar("/");
+      await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+      expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" }));
+      await waitFor(() => expect(screen.queryByTestId("sidebar-footer")).not.toBeInTheDocument());
+    });
+
+    it("keeps the user signed in and shows an error toast when sign-out fails", async () => {
+      vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ errors: ["boom"] }), { status: 500 })));
+      renderSidebar("/");
+      await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("boom");
+      expect(screen.getByTestId("sidebar-footer")).toBeInTheDocument();
     });
   });
 });

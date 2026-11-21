@@ -37,7 +37,7 @@ export function Layout({ title, children }: { title: string; children: ReactNode
       <div className="flex flex-1 flex-col md:flex-row">
         <aside
           data-collapsed={sidebarCollapsed}
-          className={`overflow-hidden border-b border-line bg-surface transition-[width] duration-200 md:shrink-0 md:border-b-0 md:border-r ${
+          className={`flex flex-col overflow-hidden border-b border-line bg-surface transition-[width] duration-200 md:shrink-0 md:border-b-0 md:border-r ${
             sidebarCollapsed ? "md:w-16" : "md:w-60"
           }`}
         >

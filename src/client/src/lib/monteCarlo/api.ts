@@ -1,3 +1,4 @@
+import { notifyUnauthorized } from "../auth/session";
 import type {
   AdoSprintHistory,
   AdoSprintHistoryRequest,
@@ -61,17 +62,34 @@ function extractErrorMessages(body: unknown, text: string): string[] {
   return [];
 }
 
+/** Header the server requires on state-changing calls (CSRF defence on top of SameSite=Lax). */
+export const CSRF_HEADER = "X-Requested-With";
+export const CSRF_VALUE = "planning-hub";
+
+function withCsrfHeader(init: RequestInit): RequestInit {
+  if ((init.method ?? "GET").toUpperCase() === "GET") {
+    return init;
+  }
+  const existing = init.headers;
+  // Keep a plain record as such (callers pass one); only normalize Headers / tuple lists.
+  const base: Record<string, string> =
+    existing instanceof Headers || Array.isArray(existing) ? Object.fromEntries(new Headers(existing)) : { ...existing };
+  return { ...init, headers: { ...base, [CSRF_HEADER]: CSRF_VALUE } };
+}
+
 /**
  * `fetch` + JSON parse; a non-2xx response becomes an {@link ApiError} with the
  * server's messages, a network failure an `ApiError` with status 0. An aborted
  * request (`init.signal`) rethrows the fetch's `AbortError` unchanged. A 204
- * resolves to `undefined`. Shared
+ * resolves to `undefined`. Every non-GET call carries the CSRF header
+ * `X-Requested-With: planning-hub`; a 401 tells the auth store the session is
+ * gone (`notifyUnauthorized`) before the `ApiError` is thrown. Shared
  * with the Azure DevOps and plan clients (`lib/ado/api.ts`).
  */
 export async function request<T>(url: string, init: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(url, init);
+    response = await fetch(url, withCsrfHeader(init));
   } catch (exc) {
     if (typeof exc === "object" && exc !== null && (exc as { name?: unknown }).name === "AbortError") {
       throw exc;
@@ -92,6 +110,9 @@ export async function request<T>(url: string, init: RequestInit): Promise<T> {
     // Non-JSON body (e.g. plain text or a proxy error page); handled below.
   }
 
+  if (response.status === 401) {
+    notifyUnauthorized();
+  }
   if (!response.ok) {
     const errors = extractErrorMessages(body, text);
     throw new ApiError(

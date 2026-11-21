@@ -11,3 +11,6 @@ sqlalchemy[asyncio]>=2.0
 asyncpg
 alembic
 mcp>=2.3,<3
+authlib
+itsdangerous
+cryptography

@@ -6,14 +6,17 @@ import { SIDEBAR_COLLAPSED_KEY } from "../lib/sidebarPreference";
 import { applyTheme, THEME_KEY } from "../lib/themePreference";
 import { resetTheme } from "../test/theme";
 import { Layout } from "./Layout";
+import { SignedIn } from "../test/SignedIn";
 
 function renderLayout(path = "/monte-carlo") {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Layout title="Test title">
-        <p>Content</p>
-      </Layout>
-    </MemoryRouter>,
+    <SignedIn>
+      <MemoryRouter initialEntries={[path]}>
+        <Layout title="Test title">
+          <p>Content</p>
+        </Layout>
+      </MemoryRouter>
+    </SignedIn>,
   );
 }
 

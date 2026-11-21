@@ -22,6 +22,8 @@ import { BOARD_TEST_TIMEOUT_MS } from "./test/renderBoard";
 import { renderAt } from "./test/render";
 import { resetTheme, stubMatchMedia } from "./test/theme";
 import { ResultsPage } from "./pages/monteCarlo/ResultsPage";
+import { AuthProvider } from "./authStore";
+import { TEST_USER } from "./test/authFixtures";
 
 const plotLayouts: Partial<PlotlyLayout>[] = [];
 
@@ -92,9 +94,11 @@ function renderApp(path = "/") {
   );
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

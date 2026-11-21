@@ -14,6 +14,8 @@ import { ForecastProvider } from "../monteCarloStore";
 import { makeBacklog, makeConnection } from "../test/adoFixtures";
 import { planDetail } from "../test/planServer";
 import { sequentialIds } from "../test/releasePlanFixtures";
+import { AuthProvider } from "../authStore";
+import { TEST_USER } from "../test/authFixtures";
 
 const PAT = "qa-readonly-sync-pat-0123456789";
 const TIMEOUT = 30_000;
@@ -47,9 +49,11 @@ function renderApp(path: string) {
   );
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

@@ -27,6 +27,30 @@ spec:
               value: {{ .Values.public_http_address | quote }}
             - name: PUBLIC_BASE_URL
               value: {{ printf "https://%s" .Values.public_http_address | quote }}
+            - name: AUTH_ENABLED
+              value: "true"
+            - name: AUTH_ALLOWED_EMAIL_DOMAINS
+              value: {{ .Values.auth.allowedEmailDomains | quote }}
+            - name: SESSION_MAX_AGE_SECONDS
+              value: {{ .Values.auth.sessionMaxAgeSeconds | quote }}
+            # The server is reachable only through its ClusterIP Service / ingress.
+            - name: FORWARDED_ALLOW_IPS
+              value: "*"
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.secret.name }}
+                  key: {{ .Values.auth.secret.googleClientIdKey }}
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.secret.name }}
+                  key: {{ .Values.auth.secret.googleClientSecretKey }}
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.secret.name }}
+                  key: {{ .Values.auth.secret.sessionSecretKey }}
             - name: DB_HOST
               value: cm-planning-hub-db-service
             - name: DB_PORT

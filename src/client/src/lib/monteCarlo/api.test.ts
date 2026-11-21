@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { onUnauthorized } from "../auth/session";
 import { makeSprintHistory } from "../../test/monteCarloFixtures";
 import { ApiError, adoSprintHistory, request, simulate } from "./api";
 
@@ -83,5 +84,57 @@ describe("request 204", () => {
   it("resolves to undefined for a 204 without parsing a body", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
     await expect(request<void>("/x", { method: "DELETE" })).resolves.toBeUndefined();
+  });
+});
+
+describe("request CSRF header and 401 handling", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function headersOf(fetchMock: ReturnType<typeof vi.fn>): Record<string, string> {
+    return (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+  }
+
+  it.each(["POST", "PUT", "DELETE", "PATCH"])("sends X-Requested-With: planning-hub on %s, keeping other headers", async (method) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await request("/x", { method, headers: { "Content-Type": "application/json" } });
+    expect(headersOf(fetchMock)).toEqual({ "Content-Type": "application/json", "X-Requested-With": "planning-hub" });
+  });
+
+  it("adds the header even when the call has no headers of its own", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await request("/x", { method: "DELETE" });
+    expect(headersOf(fetchMock)).toEqual({ "X-Requested-With": "planning-hub" });
+  });
+
+  it("does not add the header to GET (explicit or default method)", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response("{}", { status: 200 })));
+    vi.stubGlobal("fetch", fetchMock);
+    await request("/x", { method: "GET" });
+    await request("/x", {});
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit).headers).toBeUndefined();
+    }
+  });
+
+  it("notifies the unauthorized listeners on a 401 and still throws the ApiError", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ errors: ["Not authenticated."] }), { status: 401 })));
+    const listener = vi.fn();
+    const unsubscribe = onUnauthorized(listener);
+    await expect(request("/x", { method: "GET" })).rejects.toMatchObject({ status: 401, errors: ["Not authenticated."] });
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    await request("/x", { method: "GET" }).catch(() => undefined);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not notify on other errors", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ errors: ["bad"] }), { status: 422 })));
+    const listener = vi.fn();
+    const unsubscribe = onUnauthorized(listener);
+    await request("/x", { method: "POST" }).catch(() => undefined);
+    unsubscribe();
+    expect(listener).not.toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@ import pytest
 from app.config import (
     DB_NAME,
     DEFAULT_ADO_TIMEOUT_SECONDS,
+    DEFAULT_SESSION_MAX_AGE_SECONDS,
     Settings,
     get_settings,
     parse_allowed_hosts,
@@ -38,6 +39,7 @@ def test_settings_invalid_timeout_falls_back_to_default(raw):
 def test_settings_from_process_environment(monkeypatch):
     monkeypatch.setenv("ADO_ALLOWED_HOSTS", "tfs.example.com")
     monkeypatch.setenv("ADO_TIMEOUT_SECONDS", "5")
+    monkeypatch.delenv("AUTH_ENABLED")  # conftest switches auth off for the suite; compare with the defaults
     assert Settings.from_env() == Settings(ado_allowed_hosts=("tfs.example.com",), ado_timeout_seconds=5.0)
 
 
@@ -159,3 +161,92 @@ def test_invalid_description_max_chars_uses_default(raw):
 def test_invalid_description_max_chars_logs_warning(raw, caplog):
     Settings.from_env({"ADO_DESCRIPTION_MAX_CHARS": raw})
     assert "ADO_DESCRIPTION_MAX_CHARS" in caplog.text
+
+
+# --- authentication settings -------------------------------------------------
+
+
+def test_auth_defaults():
+    settings = Settings.from_env({})
+    assert settings.auth_enabled is True
+    assert settings.auth_allowed_email_domains == ()
+    assert settings.session_max_age_seconds == DEFAULT_SESSION_MAX_AGE_SECONDS == 8 * 60 * 60
+    assert (settings.google_client_id, settings.google_client_secret) == ("", "")
+    assert (settings.session_secret, settings.pat_encryption_key) == ("", "")
+
+
+def test_auth_settings_are_read_from_the_environment():
+    settings = Settings.from_env(
+        {
+            "GOOGLE_CLIENT_ID": " id ",
+            "GOOGLE_CLIENT_SECRET": "secret",
+            "SESSION_SECRET": "s3",
+            "PAT_ENCRYPTION_KEY": "key",
+            "AUTH_ENABLED": "false",
+            "AUTH_ALLOWED_EMAIL_DOMAINS": " Example.com, @Foo.org ,, ",
+            "SESSION_MAX_AGE_SECONDS": "60",
+        }
+    )
+    assert settings.google_client_id == "id"
+    assert settings.auth_enabled is False
+    assert settings.auth_allowed_email_domains == ("example.com", "foo.org")
+    assert settings.session_max_age_seconds == 60
+
+
+@pytest.mark.parametrize("raw", ["abc", "0", "-1", ""])
+def test_invalid_session_max_age_falls_back_to_default(raw):
+    assert Settings.from_env({"SESSION_MAX_AGE_SECONDS": raw}).session_max_age_seconds == DEFAULT_SESSION_MAX_AGE_SECONDS
+
+
+def test_invalid_auth_enabled_stays_enabled():
+    assert Settings.from_env({"AUTH_ENABLED": "maybe"}).auth_enabled is True
+
+
+def test_auth_secrets_are_not_in_repr():
+    settings = Settings.from_env({"GOOGLE_CLIENT_SECRET": "top-secret", "SESSION_SECRET": "cookie-key", "PAT_ENCRYPTION_KEY": "fernet"})
+    text = repr(settings)
+    assert "top-secret" not in text and "cookie-key" not in text and "fernet" not in text
+
+
+def test_auth_config_errors_lists_every_missing_secret():
+    errors = Settings.from_env({}).auth_config_errors()
+    assert [e.split(" ")[0] for e in errors] == ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SESSION_SECRET", "PUBLIC_BASE_URL"]
+
+
+def test_auth_config_errors_empty_when_configured_or_disabled():
+    configured = {
+        "GOOGLE_CLIENT_ID": "a",
+        "GOOGLE_CLIENT_SECRET": "b",
+        "SESSION_SECRET": "c" * 32,
+        "PUBLIC_BASE_URL": "https://hub.example.com",
+    }
+    assert Settings.from_env(configured).auth_config_errors() == []
+    assert Settings.from_env({"AUTH_ENABLED": "false"}).auth_config_errors() == []
+
+
+@pytest.mark.parametrize(
+    ("url", "secure"),
+    [("https://hub.example.com", True), ("HTTPS://hub.example.com", True), ("http://localhost:8080", False), ("", False)],
+)
+def test_cookie_secure_only_for_https_public_url(url, secure):
+    assert Settings.from_env({"PUBLIC_BASE_URL": url}).cookie_secure() is secure
+
+
+def test_auth_config_errors_rejects_a_short_session_secret():
+    env = {"GOOGLE_CLIENT_ID": "a", "GOOGLE_CLIENT_SECRET": "b", "PUBLIC_BASE_URL": "http://localhost:8080"}
+    errors = Settings.from_env({**env, "SESSION_SECRET": "c" * 31}).auth_config_errors()
+    assert errors == ["SESSION_SECRET must be at least 32 characters."]
+    assert Settings.from_env({**env, "SESSION_SECRET": "c" * 32}).auth_config_errors() == []
+
+
+@pytest.mark.parametrize("url", ["hub.example.com", "ftp://hub.example.com", "https://", "https://hub.example.com/app", "https://hub.example.com?x=1"])
+def test_auth_config_errors_rejects_a_bad_public_base_url(url):
+    env = {"GOOGLE_CLIENT_ID": "a", "GOOGLE_CLIENT_SECRET": "b", "SESSION_SECRET": "c" * 32, "PUBLIC_BASE_URL": url}
+    assert Settings.from_env(env).auth_config_errors() == [
+        "PUBLIC_BASE_URL must be an absolute http(s) URL without a trailing slash."
+    ]
+
+
+def test_trailing_slash_of_public_base_url_is_normalised_so_it_passes():
+    env = {"GOOGLE_CLIENT_ID": "a", "GOOGLE_CLIENT_SECRET": "b", "SESSION_SECRET": "c" * 32, "PUBLIC_BASE_URL": "http://localhost:8080/"}
+    assert Settings.from_env(env).auth_config_errors() == []

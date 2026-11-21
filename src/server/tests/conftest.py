@@ -3,11 +3,18 @@ import os
 from pathlib import Path
 
 import pytest
+# The tests run without Google credentials: switch authentication off for the
+# whole process before the app is imported (the auth tests build their own app
+# with explicit settings). Set unconditionally so a developer's shell cannot
+# make the suite fail.
+os.environ["AUTH_ENABLED"] = "false"
+
 from alembic import command
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.api.deps import require_csrf, require_user
 from app.db import get_session
 from app.main import app
 from db_helpers import alembic_config, run_sql
@@ -18,6 +25,18 @@ from app.services.data_processing import (
 )
 
 FIXTURE_PATH = Path(__file__).resolve().parents[3] / "notebook" / "Sprint_History.xlsx"
+
+
+@pytest.fixture(autouse=True)
+def _bypass_auth():
+    """The global `app` requires a session on its protected routes. Every test
+    that uses it runs as a signed-in user with no CSRF header; the auth tests
+    (test_auth_*.py) build their own app with `create_app` instead."""
+    app.dependency_overrides[require_user] = lambda: 1
+    app.dependency_overrides[require_csrf] = lambda: None
+    yield
+    app.dependency_overrides.pop(require_user, None)
+    app.dependency_overrides.pop(require_csrf, None)
 
 
 @pytest.fixture()

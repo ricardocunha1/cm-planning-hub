@@ -6,6 +6,8 @@ import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import { ForecastProvider } from "./monteCarloStore";
 import { result, validation } from "./test/monteCarloFixtures";
+import { AuthProvider } from "./authStore";
+import { TEST_USER } from "./test/authFixtures";
 
 // Full-app integration: real App routes, real pages, real api.ts; only the
 // network (`fetch`) and the Plotly chart (needs a real browser) are mocked.
@@ -36,9 +38,11 @@ function renderApp(path = "/") {
   );
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

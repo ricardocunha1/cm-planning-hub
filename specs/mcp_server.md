@@ -79,7 +79,9 @@ The plan name, connection, PAT and Azure DevOps errors use the existing messages
 - **Strict validation.** Unlike the REST API, MCP rejects unknown keys and wrong types, reports all errors at once, fills optional fields and stores the normalized board, which equals what `normalizePlan` produces. The built board is validated again as a safety net.
 - **The JSON Schema of the decisions is the only guidance the server publishes** (the `get_release_plan_schema` tool and the argument schemas of the tools); the server publishes no resources. There is no example board or prompt: the agent, or a skill driving it, decides the milestones and the assignments. The validator checks structure, not intent.
 - **Work items come from Azure DevOps.** The agent never sends titles, states, sizes, iteration paths or descriptions; it reads the descriptions with `ado_fetch_backlog` and `get_release_plan` to decide.
-- **No authentication**, as in the REST API.
+- **No authentication.** The REST API requires a Google SSO session (see
+  `specs/authentication.md`), but `/api/mcp` stays open on purpose: MCP agents
+  cannot do a browser login. Per-user API tokens are a possible follow-up.
 - **The PAT is a tool argument** of `create_release_plan`, `update_release_plan` and `ado_fetch_backlog`. It is used for that call only and is never stored, logged or returned.
 - **No delete tool.** Deleting a plan stays a UI action.
 - **Descriptions** fetched from Azure DevOps are truncated (see `specs/release_plan.md`).

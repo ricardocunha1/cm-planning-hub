@@ -6,14 +6,18 @@ import { ToastProvider } from "./components/Toast";
 import type { DataSource } from "./lib/monteCarlo/types";
 import { ForecastProvider } from "./monteCarloStore";
 import { excelSource } from "./test/monteCarloFixtures";
+import { AuthProvider } from "./authStore";
+import { TEST_USER } from "./test/authFixtures";
 
 function renderApp(path: string, dataSource: DataSource | null = null) {
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   render(
     <ToastProvider>
-      <ForecastProvider initialDataSource={dataSource}>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider initialDataSource={dataSource}>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

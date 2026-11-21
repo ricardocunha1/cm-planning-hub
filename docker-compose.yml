@@ -26,6 +26,15 @@ services:
       DB_HOST: postgres
       DB_USER: planninghub
       DB_PASSWORD: planninghub
+      # Google SSO. Set these in a .env file next to this one (see .env.example);
+      # the server refuses to start with AUTH_ENABLED=true and missing values.
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      AUTH_ALLOWED_EMAIL_DOMAINS: ${AUTH_ALLOWED_EMAIL_DOMAINS:-}
+      # nginx in the client container is the only proxy in front of the server.
+      FORWARDED_ALLOW_IPS: "*"
     depends_on:
       postgres:
         condition: service_healthy

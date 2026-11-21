@@ -68,6 +68,15 @@ class ErrorResponse(BaseModel):
     errors: list[str]
 
 
+class UserResponse(BaseModel):
+    """The signed-in user (`GET /api/auth/me`)."""
+
+    id: int
+    name: str
+    email: str
+    pictureUrl: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: str
 

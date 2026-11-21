@@ -8,6 +8,8 @@ import { SIDEBAR_COLLAPSED_KEY } from "./lib/sidebarPreference";
 import { ForecastProvider } from "./monteCarloStore";
 import { stubPlanServer } from "./test/planServer";
 import { samplePlan } from "./test/releasePlanFixtures";
+import { AuthProvider } from "./authStore";
+import { TEST_USER } from "./test/authFixtures";
 
 // Collapsible sidebar, full-app integration: the real App routes and pages
 // (each page mounts its own Layout), real jsdom localStorage. Nothing is mocked
@@ -37,9 +39,11 @@ function renderApp(path = "/") {
   );
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

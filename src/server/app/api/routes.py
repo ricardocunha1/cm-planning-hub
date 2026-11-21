@@ -22,6 +22,8 @@ from app.services.forecast import SimulationError, run_forecast
 from app.services.validation import SPRINT_HISTORY_ITEMS_FIELD, has_sprint_history_items, validate_parameters
 
 router = APIRouter()
+# Open without a session (the load balancer and the container healthcheck call it).
+public_router = APIRouter()
 
 FORM_FIELDS = (
     "target_type",
@@ -45,7 +47,7 @@ def _errors(messages: list[str]) -> JSONResponse:
     return JSONResponse(status_code=422, content={"errors": messages})
 
 
-@router.get("/health", response_model=HealthResponse)
+@public_router.get("/health", response_model=HealthResponse)
 def health():
     return {"status": "ok"}
 

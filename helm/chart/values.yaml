@@ -19,3 +19,17 @@ postgres:
     name: cm-planning-hub-db-secret
     usernameKey: username
     passwordKey: password
+# Google SSO (OIDC). Credentials come from an existing Secret that this chart does NOT create.
+# Register https://<public_http_address>/api/auth/callback as an authorized redirect URI, then:
+#   oc -n cm-planning-hub create secret generic cm-planning-hub-auth-secret \
+#     --from-literal=googleClientId=<id> --from-literal=googleClientSecret=<secret> \
+#     --from-literal=sessionSecret=$(openssl rand -hex 32)
+auth:
+  # Comma-separated e-mail domains allowed to sign in; empty = any verified Google account
+  allowedEmailDomains: ""
+  sessionMaxAgeSeconds: 28800
+  secret:
+    name: cm-planning-hub-auth-secret
+    googleClientIdKey: googleClientId
+    googleClientSecretKey: googleClientSecret
+    sessionSecretKey: sessionSecret

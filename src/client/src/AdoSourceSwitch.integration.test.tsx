@@ -9,14 +9,18 @@ import { ADO_CONNECTION_KEY as MC_KEY } from "./lib/monteCarlo/constants";
 import { ADO_CONNECTION_KEY as RP_KEY } from "./lib/releasePlan/constants";
 import { ForecastProvider } from "./monteCarloStore";
 import { makeConnectResponse } from "./test/adoFixtures";
+import { AuthProvider } from "./authStore";
+import { TEST_USER } from "./test/authFixtures";
 
 function renderApp(path: string) {
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

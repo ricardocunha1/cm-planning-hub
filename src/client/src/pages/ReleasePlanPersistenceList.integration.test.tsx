@@ -9,6 +9,8 @@ import { ToastProvider } from "../components/Toast";
 import type { PlanSummary } from "../lib/releasePlan/planTypes";
 import { ForecastProvider } from "../monteCarloStore";
 import { makeBacklog, makeConnectResponse } from "../test/adoFixtures";
+import { AuthProvider } from "../authStore";
+import { TEST_USER } from "../test/authFixtures";
 
 const PAT = "qa-secret-pat-0123456789";
 const CANONICAL = "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/My%20Proj";
@@ -36,9 +38,11 @@ function renderApp(path: string) {
   );
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

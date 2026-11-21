@@ -3,14 +3,17 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { MonteCarloLayout } from "./MonteCarloLayout";
+import { SignedIn } from "../../test/SignedIn";
 
 function renderView() {
   render(
-    <MemoryRouter initialEntries={["/monte-carlo"]}>
-      <MonteCarloLayout pageTitle="Data Input" currentStep={1}>
-        <p>step content</p>
-      </MonteCarloLayout>
-    </MemoryRouter>,
+    <SignedIn>
+      <MemoryRouter initialEntries={["/monte-carlo"]}>
+        <MonteCarloLayout pageTitle="Data Input" currentStep={1}>
+          <p>step content</p>
+        </MonteCarloLayout>
+      </MemoryRouter>
+    </SignedIn>,
   );
 }
 

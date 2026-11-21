@@ -12,6 +12,8 @@ import type { ReleasePlan } from "../lib/releasePlan/types";
 import { normalizePlan } from "../lib/releasePlan/validate";
 import { ForecastProvider } from "../monteCarloStore";
 import { makeBacklog, makeConnectResponse } from "../test/adoFixtures";
+import { AuthProvider } from "../authStore";
+import { TEST_USER } from "../test/authFixtures";
 
 // The home page's saved-plans list is not under test here (and must not count as a request).
 vi.mock("../lib/releasePlan/planApi", async (importOriginal) => ({
@@ -46,9 +48,11 @@ function renderApp(path: string) {
   );
   return render(
     <ToastProvider>
-      <ForecastProvider>
-        <RouterProvider router={router} />
-      </ForecastProvider>
+      <AuthProvider initialUser={TEST_USER}>
+        <ForecastProvider>
+          <RouterProvider router={router} />
+        </ForecastProvider>
+      </AuthProvider>
     </ToastProvider>,
   );
 }

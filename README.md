@@ -207,9 +207,29 @@ The app is split into two tiers under `src/`:
   small registry (`src/client/src/lib/tools.ts`) that feeds both the
   sidebar and the home page.
 
+## Authentication (Google SSO)
+
+Sign-in uses **OAuth 2.0 / OpenID Connect with Google** (authorization-code
+flow with PKCE). Every page and `/api` route requires a signed-in user, except
+`/api/health`, `/api/auth/*` and `/api/mcp`.
+
+Set these server variables (see `.env.example`; in Helm the credentials come
+from the Secret `cm-planning-hub-auth-secret`):
+
+| Variable | Meaning |
+| --- | --- |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth client credentials (required) |
+| `SESSION_SECRET` | Cookie signing key, at least 32 characters, e.g. `openssl rand -hex 32` (required) |
+| `PUBLIC_BASE_URL` | Public origin without trailing slash; builds the redirect URI and decides the `Secure` flag (required) |
+| `AUTH_ALLOWED_EMAIL_DOMAINS` | Optional comma-separated e-mail domains; empty = any verified Google account |
+| `SESSION_MAX_AGE_SECONDS` | Session lifetime, default 28800 (8 h) |
+| `AUTH_ENABLED` | `false` disables login (local development and tests only), default `true` |
+| `FORWARDED_ALLOW_IPS` | Proxies whose `X-Forwarded-*` headers uvicorn trusts |
+
 ## Running with Docker Compose
 
 ```bash
+cp .env.example .env             # fill in the credentials and SESSION_SECRET
 docker compose up --build        # http://localhost:8080
 docker compose down
 ```
@@ -241,6 +261,14 @@ Create it in the namespace before installing:
 ```bash
 oc -n cm-planning-hub create secret generic cm-planning-hub-db-secret \
   --from-literal=username=planninghub --from-literal=password=<password>
+```
+
+Create the auth Secret as well (see **Authentication**):
+
+```bash
+oc -n cm-planning-hub create secret generic cm-planning-hub-auth-secret \
+  --from-literal=googleClientId=<id> --from-literal=googleClientSecret=<secret> \
+  --from-literal=sessionSecret=<sessionSecret>
 ```
 
 ## Running locally (development)
