@@ -1,5 +1,6 @@
 import { useLayoutEffect } from "react";
 import { useLocation, useNavigationType } from "react-router-dom";
+import { MAIN_ID } from "./Layout";
 
 // Client-side navigation keeps the window's scroll offset, so a page reached
 // from a scrolled-down page (e.g. Confirm -> Results) would open mid-page.
@@ -10,7 +11,10 @@ export function ScrollToTop() {
   const navigationType = useNavigationType();
 
   useLayoutEffect(() => {
-    if (navigationType !== "POP") window.scrollTo(0, 0);
+    if (navigationType === "POP") return;
+    window.scrollTo(0, 0);
+    const main = document.getElementById(MAIN_ID);
+    if (main) main.scrollTop = 0;
   }, [pathname, navigationType]);
 
   return null;

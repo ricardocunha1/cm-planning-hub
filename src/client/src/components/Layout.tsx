@@ -5,9 +5,11 @@ import { HUB_NAME } from "../lib/tools";
 import { Sidebar } from "./Sidebar";
 import { ThemeToggle } from "./ThemeToggle";
 
+export const MAIN_ID = "main-content";
+
 /**
  * Dashboard shell: global header (logo + hub name, theme toggle at the right), left sidebar and main content area.
- * Owns the sidebar's collapsed state, persisted in localStorage across pages and reloads. The header keeps its
+ * On desktop the shell fills the viewport and only <main> scrolls, so the sidebar footer stays visible. Owns the sidebar's collapsed state, persisted in localStorage across pages and reloads. The header keeps its
  * brand-blue background and light text in both themes.
  */
 export function Layout({ title, children }: { title: string; children: ReactNode }) {
@@ -24,7 +26,7 @@ export function Layout({ title, children }: { title: string; children: ReactNode
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col md:h-screen md:overflow-hidden">
       <header className="flex items-center gap-4 px-6 py-4 border-b border-line text-slate-100" style={{ backgroundColor: "var(--cm-dark-blue)" }}>
         <Link to="/" aria-label={`${HUB_NAME} home`}>
           <img src="/cmlogo.png" alt="CM Logo" className="h-10 w-auto" />
@@ -34,7 +36,7 @@ export function Layout({ title, children }: { title: string; children: ReactNode
           <ThemeToggle />
         </div>
       </header>
-      <div className="flex flex-1 flex-col md:flex-row">
+      <div className="flex flex-1 flex-col md:min-h-0 md:flex-row">
         <aside
           data-collapsed={sidebarCollapsed}
           className={`flex flex-col overflow-hidden border-b border-line bg-surface transition-[width] duration-200 md:shrink-0 md:border-b-0 md:border-r ${
@@ -43,7 +45,7 @@ export function Layout({ title, children }: { title: string; children: ReactNode
         >
           <Sidebar collapsed={sidebarCollapsed} onToggleCollapsed={toggleSidebar} />
         </aside>
-        <main className="min-w-0 flex-1">{children}</main>
+        <main id={MAIN_ID} className="min-w-0 flex-1 md:overflow-y-auto">{children}</main>
       </div>
     </div>
   );
