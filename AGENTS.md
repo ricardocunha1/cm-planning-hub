@@ -284,7 +284,7 @@ cd src/client && npm run build            # tsc -b type-check + production build
 
 Environment notes:
 
-- The devcontainer provides Python 3.12 (`.venv`) and Node 22. If `node` is
+- The devcontainer provides Python 3.12 (`.venv`) and Node 26. If `node` is
   missing: `export PATH=~/.local/node/bin:$PATH`.
 - Docker is docker-outside-of-docker: published ports are reachable at
   `172.17.0.1:<port>`, not `localhost`. If attached `docker run` drops

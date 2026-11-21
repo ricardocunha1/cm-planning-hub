@@ -1,5 +1,5 @@
 # Build stage: compile the SPA into static files.
-FROM node:20-alpine AS build
+FROM node:26-alpine AS build
 
 WORKDIR /app
 

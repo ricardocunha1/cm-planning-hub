@@ -19,5 +19,7 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     css: false,
+    // Node 26 ships a global `localStorage` that shadows jsdom's; disable it.
+    execArgv: ["--no-experimental-webstorage"],
   },
 });

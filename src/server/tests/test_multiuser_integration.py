@@ -147,10 +147,10 @@ def rpc_tool(client, name, arguments):
     return r.json()["result"]
 
 
-# --- migration 0003 ------------------------------------------------------------------
+# --- migration 0001 (ado_credentials, owner_id) ------------------------------------------------------------------
 
 
-def test_migration_0003_schema_constraints_and_downgrade(migrated_db):
+def test_migration_0001_schema_constraints_and_downgrade(migrated_db):
     from alembic import command
 
     from db_helpers import alembic_config
@@ -179,35 +179,13 @@ def test_migration_0003_schema_constraints_and_downgrade(migrated_db):
 
     config = alembic_config(migrated_db)
     try:
-        command.downgrade(config, "0002")
+        command.downgrade(config, "base")
         assert query(migrated_db, "SELECT to_regclass('ado_credentials')") == [(None,)]
-        assert query(
-            migrated_db, "SELECT count(*) FROM information_schema.columns WHERE table_name='release_plans' AND column_name='owner_id'"
-        ) == [(0,)]
-        assert query(migrated_db, "SELECT to_regclass('users')") == [("users",)]
+        assert query(migrated_db, "SELECT to_regclass('release_plans')") == [(None,)]
+        assert query(migrated_db, "SELECT to_regclass('users')") == [(None,)]
     finally:
         command.upgrade(config, "head")
     assert query(migrated_db, "SELECT to_regclass('ado_credentials')") == [("ado_credentials",)]
-
-
-def test_upgrade_from_0002_keeps_existing_boards_unowned(migrated_db):
-    from alembic import command
-
-    from db_helpers import alembic_config
-
-    config = alembic_config(migrated_db)
-    try:
-        command.downgrade(config, "0002")
-        run_sql(migrated_db, "TRUNCATE release_plans RESTART IDENTITY")
-        run_sql(
-            migrated_db,
-            "INSERT INTO release_plans (name, project_type, project_name, state) VALUES ('old','cloud','P','{}')",
-        )
-        command.upgrade(config, "head")
-        assert query(migrated_db, "SELECT name, owner_id FROM release_plans") == [("old", None)]
-    finally:
-        command.upgrade(config, "head")
-        run_sql(migrated_db, "TRUNCATE release_plans RESTART IDENTITY")
 
 
 # --- DB behaviour ---------------------------------------------------------------------

@@ -57,7 +57,7 @@ def test_lifespan_migrates_empty_schema_to_head_and_is_idempotent(db_env, caplog
         with TestClient(app) as client:
             assert client.get("/api/health").status_code == 200
     assert "release_plans" in _tables(url)
-    assert query(url, "SELECT version_num FROM alembic_version") == [("0003",)]
+    assert query(url, "SELECT version_num FROM alembic_version") == [("0001",)]
     assert "Database migrations applied" in caplog.text
     assert ":planninghub@" not in caplog.text and ":***@" in caplog.text
 
@@ -65,7 +65,7 @@ def test_lifespan_migrates_empty_schema_to_head_and_is_idempotent(db_env, caplog
     run_sql(url, "INSERT INTO release_plans (name, project_type, project_name, state) VALUES ('a','cloud','P','{}')")
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200
-    assert query(url, "SELECT version_num FROM alembic_version") == [("0003",)]
+    assert query(url, "SELECT version_num FROM alembic_version") == [("0001",)]
     assert query(url, "SELECT count(*) FROM release_plans") == [(1,)]
     run_sql(url, "TRUNCATE release_plans RESTART IDENTITY")
 

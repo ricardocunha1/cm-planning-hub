@@ -1,4 +1,4 @@
-"""PostgreSQL integration (marker `db`) for migration 0002 and the real user
+"""PostgreSQL integration (marker `db`) for the users table of migration 0001 and the real user
 upsert behind the login callback."""
 import asyncio
 
@@ -19,7 +19,7 @@ from test_db_migrations import query
 pytestmark = pytest.mark.db
 
 
-def test_migration_0002_creates_users_table_and_downgrades_cleanly(migrated_db):
+def test_migration_0001_creates_users_table_and_downgrades_cleanly(migrated_db):
     config = alembic_config(migrated_db)
     cols = {r[0]: r for r in query(
         migrated_db,
@@ -34,9 +34,9 @@ def test_migration_0002_creates_users_table_and_downgrades_cleanly(migrated_db):
     )
     assert unique == [(1,)]
     try:
-        command.downgrade(config, "0001")
+        command.downgrade(config, "base")
         assert query(migrated_db, "SELECT to_regclass('users')") == [(None,)]
-        assert query(migrated_db, "SELECT to_regclass('release_plans')") == [("release_plans",)]
+        assert query(migrated_db, "SELECT to_regclass('release_plans')") == [(None,)]
     finally:
         command.upgrade(config, "head")
     assert query(migrated_db, "SELECT to_regclass('users')") == [("users",)]

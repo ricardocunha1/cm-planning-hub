@@ -275,7 +275,7 @@ oc -n cm-planning-hub create secret generic cm-planning-hub-auth-secret \
 
 ## Running locally (development)
 
-Requires Python 3.12 and Node 22 (both are set up by the devcontainer,
+Requires Python 3.12 and Node 26 (both are set up by the devcontainer,
 which also installs the server and client dependencies), and a PostgreSQL
 database for the Release Plan API.
 

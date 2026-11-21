@@ -13,7 +13,7 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install -r src/server/requirements.txt
 
-# Client dependencies (src/client); Node 22 comes from the devcontainer
+# Client dependencies (src/client); Node 26 comes from the devcontainer
 # "node" feature. Uses the committed lockfile, so npm 10 is fine here.
 (cd src/client && npm ci)
 
