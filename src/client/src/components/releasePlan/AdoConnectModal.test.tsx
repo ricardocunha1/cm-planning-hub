@@ -3,12 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ADO_CONNECTION_KEY } from "../../lib/releasePlan/constants";
 import type { ReleasePlan } from "../../lib/releasePlan/types";
-import { PLACEHOLDER } from "../../lib/ado/url";
-import { makeBacklog, makeConnectResponse } from "../../test/adoFixtures";
+import type { AdoCredential } from "../../lib/settings/types";
+import { ADO_CREDENTIALS, makeBacklog, makeConnectResponse } from "../../test/adoFixtures";
+import { useSettings } from "../../settingsStore";
+import { SignedIn } from "../../test/SignedIn";
 import { AdoConnectModal } from "./AdoConnectModal";
 
-const PAT = "s3cr3t-pat-value";
-const URL_OK = "https://dev.azure.com/org/Proj/";
+const PROJECT_URL = "https://dev.azure.com/org/Proj";
 
 type Handler = (body: Record<string, unknown>, init: RequestInit) => Response | Promise<Response>;
 
@@ -46,24 +47,32 @@ function hanging(signals: AbortSignal[]): Handler {
     });
 }
 
-function renderModal() {
-  const onClose = vi.fn();
-  const onCreated = vi.fn();
-  const view = render(<AdoConnectModal open onClose={onClose} onCreated={onCreated} />);
-  return { onClose, onCreated, ...view };
+/** Stands in for the sidebar's SettingsButton: shows whether the Settings modal was asked to open. */
+function SettingsProbe() {
+  const { settingsOpen } = useSettings();
+  return <p data-testid="settings-open">{String(settingsOpen)}</p>;
 }
 
-const urlInput = () => screen.getByLabelText("Project URL");
-const patInput = () => screen.getByLabelText("Personal Access Token");
+function renderModal(credentials: AdoCredential[] = ADO_CREDENTIALS) {
+  const onClose = vi.fn();
+  const onCreated = vi.fn();
+  const ui = (open: boolean) => (
+    <SignedIn credentials={credentials}>
+      <AdoConnectModal open={open} onClose={onClose} onCreated={onCreated} />
+      <SettingsProbe />
+    </SignedIn>
+  );
+  const view = render(ui(true));
+  return { onClose, onCreated, ui, ...view };
+}
+
+const projectSelect = () => screen.getByLabelText("Project");
 const connectButton = () => screen.getByRole("button", { name: /^(Connect|Connecting…)$/ });
 const nameInput = () => screen.getByLabelText("Plan name");
 const submitButton = (name = "Create board") => screen.getByRole("button", { name });
 
-async function fillAndConnect(user: ReturnType<typeof userEvent.setup>, { source = "Collaboration Hub", url = URL_OK, pat = PAT } = {}) {
-  await user.click(screen.getByRole("radio", { name: source }));
-  await user.clear(urlInput());
-  await user.type(urlInput(), url);
-  await user.type(patInput(), pat);
+async function fillAndConnect(user: ReturnType<typeof userEvent.setup>, project = "Proj") {
+  await user.selectOptions(projectSelect(), project);
   await user.click(connectButton());
 }
 
@@ -74,81 +83,90 @@ describe("AdoConnectModal", () => {
     window.localStorage.clear();
   });
 
-  it("clears the Project URL (not the PAT) when the source changes, showing the new placeholder", async () => {
-    const user = userEvent.setup();
-    renderModal();
-    await user.type(urlInput(), URL_OK);
-    await user.type(patInput(), PAT);
-    await user.click(screen.getByRole("radio", { name: "On-Prem" }));
-    expect(urlInput()).toHaveValue("");
-    expect(urlInput()).toHaveAttribute("placeholder", PLACEHOLDER.onprem);
-    expect(patInput()).toHaveValue(PAT);
-    await user.type(urlInput(), "https://x/y");
-    await user.click(screen.getByRole("radio", { name: "Collaboration Hub" }));
-    expect(urlInput()).toHaveValue("");
-    expect(urlInput()).toHaveAttribute("placeholder", PLACEHOLDER.cloud);
-    expect(patInput()).toHaveValue(PAT);
-  });
-
   it("renders nothing when closed", () => {
-    render(<AdoConnectModal open={false} onClose={vi.fn()} onCreated={vi.fn()} />);
+    render(
+      <SignedIn credentials={ADO_CREDENTIALS}>
+        <AdoConnectModal open={false} onClose={vi.fn()} onCreated={vi.fn()} />
+      </SignedIn>,
+    );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("has the create title, the fields and a disabled submit", () => {
+  it("has the create title, a project list (no source, URL or PAT fields) and a disabled submit", () => {
     renderModal();
     expect(screen.getByRole("dialog", { name: "Create from Azure DevOps" })).toHaveAttribute("aria-modal", "true");
-    expect(screen.getByRole("radio", { name: "On-Prem" })).not.toBeChecked();
-    expect(screen.getByRole("radio", { name: "Collaboration Hub" })).toBeChecked();
-    expect(patInput()).toHaveAttribute("type", "password");
-    expect(patInput()).toHaveAttribute("autocomplete", "off");
+    expect(projectSelect().tagName).toBe("SELECT");
+    expect(screen.queryByRole("radio", { name: "On-Prem" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Project URL")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Personal Access Token")).not.toBeInTheDocument();
     expect(submitButton()).toBeDisabled();
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
   });
 
-  it("defaults to Collaboration Hub with its URL placeholder when nothing is remembered", () => {
-    renderModal();
-    expect(screen.getByRole("radio", { name: "Collaboration Hub" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "On-Prem" })).not.toBeChecked();
-    expect(urlInput()).toHaveValue("");
-    expect(urlInput()).toHaveAttribute("placeholder", "https://dev.azure.com/<ORGANIZATION>/<PROJECT_NAME>");
-  });
-
-  it("switches the URL placeholder with the source", async () => {
+  it("lists the configured projects by name and shows the selected project's URL below", async () => {
     const user = userEvent.setup();
     renderModal();
-    await user.click(screen.getByRole("radio", { name: "On-Prem" }));
-    expect(urlInput()).toHaveAttribute("placeholder", "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/<PROJECT_NAME>");
-    await user.click(screen.getByRole("radio", { name: "Collaboration Hub" }));
-    expect(urlInput()).toHaveAttribute("placeholder", "https://dev.azure.com/<ORGANIZATION>/<PROJECT_NAME>");
+    expect(within(projectSelect()).getAllByRole("option").map((option) => option.textContent)).toEqual(["Select a project…", "Proj", "Legacy"]);
+    expect(projectSelect()).toHaveValue("");
+    expect(screen.queryByText(PROJECT_URL)).not.toBeInTheDocument();
+    await user.selectOptions(projectSelect(), "Legacy");
+    expect(screen.getByText("https://tfs.example.com/C/P")).toBeInTheDocument();
+    expect(projectSelect()).toHaveAccessibleDescription("https://tfs.example.com/C/P");
   });
 
-  it("reports blank fields together, in order, without a request", async () => {
+  it("loads the projects when the modal opens and offers Retry after a failure", async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      return calls === 1 ? json({ errors: ["boom"] }, 500) : json({ items: ADO_CREDENTIALS });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onClose = vi.fn();
+    render(
+      <SignedIn>
+        <AdoConnectModal open onClose={onClose} onCreated={vi.fn()} />
+      </SignedIn>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Loading projects…");
+    expect(connectButton()).toBeDisabled();
+    expect(await screen.findByText("Could not load your projects.")).toBeInTheDocument();
+    expect(connectButton()).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByLabelText("Project")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(connectButton()).toBeEnabled();
+  });
+
+  it("with no configured project shows a message, disables Connect and opens Settings from 'Open settings'", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetch();
+    renderModal([]);
+    expect(screen.getByText("No Azure DevOps projects configured yet.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Project")).not.toBeInTheDocument();
+    expect(connectButton()).toBeDisabled();
+    expect(screen.getByTestId("settings-open")).toHaveTextContent("false");
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    expect(screen.getByTestId("settings-open")).toHaveTextContent("true");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("asks to select a project without a request, flagging the field", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch();
     renderModal();
     await user.click(connectButton());
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("Enter the Azure DevOps project URL.Enter a Personal Access Token.");
-    expect(alert).not.toHaveTextContent("Choose the Azure DevOps source");
+    expect(alert).toHaveTextContent("Select an Azure DevOps project.");
+    expect(projectSelect()).toHaveAttribute("aria-invalid", "true");
+    expect(projectSelect().getAttribute("aria-describedby")?.split(" ")).toContain(alert.id);
     expect(fetchMock).not.toHaveBeenCalled();
+    await user.selectOptions(projectSelect(), "Proj");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(projectSelect()).not.toHaveAttribute("aria-invalid");
   });
 
-  it("shows a URL shape error inline without a request", async () => {
-    const user = userEvent.setup();
-    const fetchMock = mockFetch();
-    renderModal();
-    await fillAndConnect(user, { url: "https://dev.azure.com/org" });
-    expect(screen.getByRole("alert")).toHaveTextContent("Collaboration Hub URLs look like https://dev.azure.com/<organization>/<project>.");
-    await user.clear(urlInput());
-    await user.type(urlInput(), "http://dev.azure.com/org/Proj");
-    await user.click(connectButton());
-    expect(screen.getByRole("alert")).toHaveTextContent("The URL must start with https://.");
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-  });
-
-  it("connects: sends the PAT in the JSON body only, shows the Area tree and remembers the connection", async () => {
+  it("connects: sends the project URL and inferred source without any PAT, shows the Area tree and remembers the project", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch();
     renderModal();
@@ -158,18 +176,21 @@ describe("AdoConnectModal", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/ado/connect");
-    expect(url).not.toContain(PAT);
     expect(init.method).toBe("POST");
-    expect(JSON.stringify(init.headers)).not.toContain(PAT);
-    expect(JSON.parse(String(init.body))).toEqual({ source: "cloud", projectUrl: URL_OK, pat: PAT });
-    expect(JSON.parse(window.localStorage.getItem(ADO_CONNECTION_KEY) ?? "null")).toEqual({
-      source: "cloud",
-      projectUrl: "https://dev.azure.com/org/Proj",
+    expect(JSON.parse(String(init.body))).toEqual({ source: "cloud", projectUrl: PROJECT_URL });
+    expect(JSON.parse(window.localStorage.getItem(ADO_CONNECTION_KEY) ?? "null")).toEqual({ source: "cloud", projectUrl: PROJECT_URL });
+  });
+
+  it("infers the on-prem source from a non-Azure host", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockFetch();
+    renderModal();
+    await fillAndConnect(user, "Legacy");
+    await screen.findByRole("tree");
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual({
+      source: "onprem",
+      projectUrl: "https://tfs.example.com/C/P",
     });
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i) ?? "";
-      expect(window.localStorage.getItem(key)).not.toContain(PAT);
-    }
   });
 
   it("shows 'Connecting…' and disables Connect while the request runs", async () => {
@@ -186,15 +207,18 @@ describe("AdoConnectModal", () => {
     expect(connectButton()).toBeEnabled();
   });
 
-  it("shows server 422 errors inline and keeps the PAT", async () => {
+  it("shows server 422 errors inline (e.g. no PAT stored) with a hint to edit the project in Settings, keeping the selection", async () => {
     const user = userEvent.setup();
-    const message = "Azure DevOps rejected the Personal Access Token (invalid, expired or missing the Work Items (Read) scope).";
+    const message = "A Personal Access Token is required. Save one for this project in Settings.";
     mockFetch({ connect: () => json({ errors: [message] }, 422) });
     renderModal();
     await fillAndConnect(user);
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
-    expect(patInput()).toHaveValue(PAT);
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(projectSelect()).toHaveValue("11");
+    expect(screen.getByText(/edit the project in/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByTestId("settings-open")).toHaveTextContent("true");
+    expect(screen.getByRole("dialog", { name: "Create from Azure DevOps" })).toBeInTheDocument();
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
   });
 
@@ -219,7 +243,6 @@ describe("AdoConnectModal", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       source: "cloud",
       projectUrl: "https://dev.azure.com/org/Proj",
-      pat: PAT,
       scopeType: "area",
       scopePath: "Proj\\Team A",
     });
@@ -294,81 +317,35 @@ describe("AdoConnectModal", () => {
     expect(screen.getByRole("tree")).not.toHaveAttribute("aria-disabled");
   });
 
-  it("links invalid fields to the inline error (aria-invalid / aria-describedby)", async () => {
-    const user = userEvent.setup();
-    mockFetch();
-    renderModal();
-    await user.click(connectButton());
-    const alert = screen.getByRole("alert");
-    expect(alert.id).not.toBe("");
-    expect(urlInput()).toHaveAttribute("aria-invalid", "true");
-    expect(urlInput()).toHaveAttribute("aria-describedby", alert.id);
-    expect(patInput()).toHaveAttribute("aria-invalid", "true");
-    expect(patInput().getAttribute("aria-describedby")?.split(" ")).toContain(alert.id);
-    expect(patInput()).toHaveAccessibleDescription(/Needs the Work Items \(Read\) scope.*Enter a Personal Access Token\./);
-    // A source is always selected (Collaboration Hub by default), so it is never flagged.
-    expect(screen.getByRole("group", { name: "Azure DevOps source" })).not.toHaveAttribute("aria-describedby");
-    // Only the URL is wrong now: the PAT is no longer flagged.
-    await fillAndConnect(user, { url: "https://dev.azure.com/org" });
-    expect(urlInput()).toHaveAttribute("aria-invalid", "true");
-    expect(urlInput()).toHaveAccessibleDescription("Collaboration Hub URLs look like https://dev.azure.com/<organization>/<project>.");
-    expect(patInput()).not.toHaveAttribute("aria-invalid");
-    expect(patInput()).toHaveAccessibleDescription(/^Needs the Work Items \(Read\) scope\. It is sent only to connect and is never stored\.$/);
-    expect(screen.getByRole("group", { name: "Azure DevOps source" })).not.toHaveAttribute("aria-describedby");
-    // Editing clears the error and the flags.
-    await user.type(urlInput(), "/Proj");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(urlInput()).not.toHaveAttribute("aria-invalid");
-    expect(urlInput()).not.toHaveAttribute("aria-describedby");
-  });
-
-  it("does not flag a field for a server error", async () => {
+  it("does not flag the project for a server error", async () => {
     const user = userEvent.setup();
     mockFetch({ connect: () => json({ errors: ["Project not found: Proj. Check the URL."] }, 422) });
     renderModal();
     await fillAndConnect(user);
     expect(await screen.findByRole("alert")).toHaveTextContent("Project not found");
-    expect(urlInput()).not.toHaveAttribute("aria-invalid");
-    expect(patInput()).not.toHaveAttribute("aria-invalid");
+    expect(projectSelect()).not.toHaveAttribute("aria-invalid");
   });
 
-  it("asks password managers to ignore the PAT input", () => {
-    renderModal();
-    expect(patInput()).toHaveAttribute("data-1p-ignore", "true");
-    expect(patInput()).toHaveAttribute("data-lpignore", "true");
-    expect(patInput()).toHaveAttribute("data-form-type", "other");
-  });
-
-  it.each([
-    ["the URL", () => urlInput(), "x"],
-    ["the PAT", () => patInput(), "x"],
-  ])("editing %s after Connect resets the trees", async (_name, field, extra) => {
+  it("changing the project after Connect resets the trees", async () => {
     const user = userEvent.setup();
     mockFetch();
     renderModal();
     await fillAndConnect(user);
     await user.click(within(await screen.findByRole("tree")).getByRole("treeitem", { name: /^Team B/ }));
-    await user.type(field(), extra);
+    await user.selectOptions(projectSelect(), "Legacy");
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
     expect(submitButton()).toBeDisabled();
   });
 
-  it("changing the source after Connect resets the trees", async () => {
-    const user = userEvent.setup();
-    mockFetch();
-    renderModal();
-    await fillAndConnect(user);
-    await screen.findByRole("tree");
-    await user.click(screen.getByRole("radio", { name: "On-Prem" }));
-    expect(screen.queryByRole("tree")).not.toBeInTheDocument();
-  });
-
-  it("pre-fills from the remembered connection (never a PAT)", () => {
+  it("pre-selects the remembered project by URL and ignores one that no longer exists", () => {
     window.localStorage.setItem(ADO_CONNECTION_KEY, JSON.stringify({ source: "onprem", projectUrl: "https://tfs.example.com/C/P" }));
+    const first = renderModal();
+    expect(projectSelect()).toHaveValue("12");
+    expect(screen.getByText("https://tfs.example.com/C/P")).toBeInTheDocument();
+    first.unmount();
+    window.localStorage.setItem(ADO_CONNECTION_KEY, JSON.stringify({ source: "cloud", projectUrl: "https://dev.azure.com/org/Gone" }));
     renderModal();
-    expect(screen.getByRole("radio", { name: "On-Prem" })).toBeChecked();
-    expect(urlInput()).toHaveValue("https://tfs.example.com/C/P");
-    expect(patInput()).toHaveValue("");
+    expect(projectSelect()).toHaveValue("");
   });
 
   it("Cancel, Escape and the backdrop close", async () => {
@@ -384,26 +361,25 @@ describe("AdoConnectModal", () => {
     const user = userEvent.setup();
     const signals: AbortSignal[] = [];
     mockFetch({ connect: hanging(signals) });
-    const { onCreated, rerender, onClose } = renderModal();
+    const { ui, rerender } = renderModal();
     await fillAndConnect(user);
     expect(signals).toHaveLength(1);
     expect(signals[0].aborted).toBe(false);
-    rerender(<AdoConnectModal open={false} onClose={onClose} onCreated={onCreated} />);
+    rerender(ui(false));
     expect(signals[0].aborted).toBe(true);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("starts fresh (no PAT, no tree) when reopened", async () => {
+  it("starts fresh (no tree) when reopened, with the connected project remembered", async () => {
     const user = userEvent.setup();
     mockFetch();
-    const { onCreated, rerender, onClose } = renderModal();
+    const { ui, rerender } = renderModal();
     await fillAndConnect(user);
     await screen.findByRole("tree");
-    rerender(<AdoConnectModal open={false} onClose={onClose} onCreated={onCreated} />);
-    rerender(<AdoConnectModal open onClose={onClose} onCreated={onCreated} />);
-    expect(patInput()).toHaveValue("");
+    rerender(ui(false));
+    rerender(ui(true));
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
-    expect(urlInput()).toHaveValue("https://dev.azure.com/org/Proj");
+    expect(projectSelect()).toHaveValue("11");
   });
 
   describe("plan name", () => {
@@ -477,7 +453,6 @@ describe("AdoConnectModal", () => {
       const body = JSON.parse(String(init.body)) as { name: string; projectType: string; projectName: string; state: ReleasePlan };
       expect(body).toMatchObject({ name: "Q4 plan", projectType: "cloud", projectName: "Proj" });
       expect(body.state.name).toBe("Q4 plan");
-      expect(JSON.stringify(body)).not.toContain(PAT);
       const [id, plan] = onCreated.mock.calls[0] as [number, ReleasePlan];
       expect(id).toBe(7);
       expect(plan.name).toBe("Q4 plan");

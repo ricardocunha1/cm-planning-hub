@@ -10,11 +10,12 @@ export type AdoSource = "onprem" | "cloud";
 /** Which classification tree a scope is picked from. */
 export type AdoScopeType = "area" | "iteration";
 
-/** The part of every `/api/ado/*` request that identifies the project. The PAT is never persisted. */
+/** The part of every `/api/ado/*` request that identifies the project. The SPA never holds the PAT: the server uses the one the signed-in user stored (encrypted) in Settings. */
 export interface AdoConnectionRequest {
   source: AdoSource;
   projectUrl: string;
-  pat: string;
+  /** Omitted by the connect modals: the server then uses the signed-in user's PAT stored for `projectUrl`. */
+  pat?: string;
 }
 
 /** A classification node with its path normalized to the `System.AreaPath`/`System.IterationPath` format. */
@@ -54,5 +55,5 @@ export interface AdoConnection {
   scopePath: string;
 }
 
-/** An {@link AdoConnection} with the PAT: what the connect modal hands to its loader. */
+/** An {@link AdoConnection} with an optional PAT (the connect modals send none): what the connect modal hands to its loader. */
 export type AdoScopedRequest = AdoConnection & Pick<AdoConnectionRequest, "pat">;

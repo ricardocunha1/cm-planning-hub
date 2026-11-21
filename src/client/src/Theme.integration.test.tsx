@@ -16,6 +16,7 @@ import { CONFIDENCE_COLORS, CONFIDENCE_TEXT_COLORS } from "./lib/monteCarlo/conf
 import { PALETTES } from "./lib/releasePlan/constants";
 import { THEME_KEY } from "./lib/themePreference";
 import { ForecastProvider } from "./monteCarloStore";
+import { SettingsProvider } from "./settingsStore";
 import { FakeImage, RecordingContext, stubCanvas } from "./test/canvas";
 import { result } from "./test/monteCarloFixtures";
 import { BOARD_TEST_TIMEOUT_MS } from "./test/renderBoard";
@@ -95,9 +96,11 @@ function renderApp(path = "/") {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );

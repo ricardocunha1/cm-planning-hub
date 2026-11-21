@@ -1,4 +1,5 @@
 import pytest
+from cryptography.fernet import Fernet
 
 from app.config import (
     DB_NAME,
@@ -6,10 +7,12 @@ from app.config import (
     DEFAULT_SESSION_MAX_AGE_SECONDS,
     Settings,
     get_settings,
+    is_valid_fernet_key,
     parse_allowed_hosts,
     parse_mcp_allowed_hosts,
 )
 
+FERNET_KEY = Fernet.generate_key().decode()
 ONPREM_HOST = "tfs-projects.cmf.criticalmanufacturing.com"
 
 
@@ -210,7 +213,13 @@ def test_auth_secrets_are_not_in_repr():
 
 def test_auth_config_errors_lists_every_missing_secret():
     errors = Settings.from_env({}).auth_config_errors()
-    assert [e.split(" ")[0] for e in errors] == ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SESSION_SECRET", "PUBLIC_BASE_URL"]
+    assert [e.split(" ")[0] for e in errors] == [
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "SESSION_SECRET",
+        "PAT_ENCRYPTION_KEY",
+        "PUBLIC_BASE_URL",
+    ]
 
 
 def test_auth_config_errors_empty_when_configured_or_disabled():
@@ -218,6 +227,7 @@ def test_auth_config_errors_empty_when_configured_or_disabled():
         "GOOGLE_CLIENT_ID": "a",
         "GOOGLE_CLIENT_SECRET": "b",
         "SESSION_SECRET": "c" * 32,
+        "PAT_ENCRYPTION_KEY": FERNET_KEY,
         "PUBLIC_BASE_URL": "https://hub.example.com",
     }
     assert Settings.from_env(configured).auth_config_errors() == []
@@ -233,7 +243,12 @@ def test_cookie_secure_only_for_https_public_url(url, secure):
 
 
 def test_auth_config_errors_rejects_a_short_session_secret():
-    env = {"GOOGLE_CLIENT_ID": "a", "GOOGLE_CLIENT_SECRET": "b", "PUBLIC_BASE_URL": "http://localhost:8080"}
+    env = {
+        "GOOGLE_CLIENT_ID": "a",
+        "GOOGLE_CLIENT_SECRET": "b",
+        "PAT_ENCRYPTION_KEY": FERNET_KEY,
+        "PUBLIC_BASE_URL": "http://localhost:8080",
+    }
     errors = Settings.from_env({**env, "SESSION_SECRET": "c" * 31}).auth_config_errors()
     assert errors == ["SESSION_SECRET must be at least 32 characters."]
     assert Settings.from_env({**env, "SESSION_SECRET": "c" * 32}).auth_config_errors() == []
@@ -241,12 +256,43 @@ def test_auth_config_errors_rejects_a_short_session_secret():
 
 @pytest.mark.parametrize("url", ["hub.example.com", "ftp://hub.example.com", "https://", "https://hub.example.com/app", "https://hub.example.com?x=1"])
 def test_auth_config_errors_rejects_a_bad_public_base_url(url):
-    env = {"GOOGLE_CLIENT_ID": "a", "GOOGLE_CLIENT_SECRET": "b", "SESSION_SECRET": "c" * 32, "PUBLIC_BASE_URL": url}
+    env = {
+        "GOOGLE_CLIENT_ID": "a",
+        "GOOGLE_CLIENT_SECRET": "b",
+        "SESSION_SECRET": "c" * 32,
+        "PAT_ENCRYPTION_KEY": FERNET_KEY,
+        "PUBLIC_BASE_URL": url,
+    }
     assert Settings.from_env(env).auth_config_errors() == [
         "PUBLIC_BASE_URL must be an absolute http(s) URL without a trailing slash."
     ]
 
 
 def test_trailing_slash_of_public_base_url_is_normalised_so_it_passes():
-    env = {"GOOGLE_CLIENT_ID": "a", "GOOGLE_CLIENT_SECRET": "b", "SESSION_SECRET": "c" * 32, "PUBLIC_BASE_URL": "http://localhost:8080/"}
+    env = {
+        "GOOGLE_CLIENT_ID": "a",
+        "GOOGLE_CLIENT_SECRET": "b",
+        "SESSION_SECRET": "c" * 32,
+        "PAT_ENCRYPTION_KEY": FERNET_KEY,
+        "PUBLIC_BASE_URL": "http://localhost:8080/",
+    }
     assert Settings.from_env(env).auth_config_errors() == []
+
+
+@pytest.mark.parametrize("key", ["not-a-key", "short", "a" * 44, "é" * 44])
+def test_auth_config_errors_rejects_an_invalid_pat_encryption_key(key):
+    env = {
+        "GOOGLE_CLIENT_ID": "a",
+        "GOOGLE_CLIENT_SECRET": "b",
+        "SESSION_SECRET": "c" * 32,
+        "PAT_ENCRYPTION_KEY": key,
+        "PUBLIC_BASE_URL": "http://localhost:8080",
+    }
+    errors = Settings.from_env(env).auth_config_errors()
+    assert errors == ["PAT_ENCRYPTION_KEY must be a valid Fernet key (32 url-safe base64-encoded bytes)."]
+    assert key not in errors[0]
+
+
+def test_is_valid_fernet_key():
+    assert is_valid_fernet_key(FERNET_KEY)
+    assert not is_valid_fernet_key("")

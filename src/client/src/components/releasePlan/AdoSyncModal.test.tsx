@@ -1,11 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
+import type { AdoCredential } from "../../lib/settings/types";
+import { useSettings } from "../../settingsStore";
+import { SignedIn } from "../../test/SignedIn";
 import type { PlanSource } from "../../lib/releasePlan/types";
 import { makeBacklog } from "../../test/adoFixtures";
 import { AdoSyncModal } from "./AdoSyncModal";
 
-const PAT = "sync-s3cr3t-pat";
+const CLOUD_CREDENTIAL: AdoCredential = { id: 1, projectName: "Proj Saved", projectUrl: "https://DEV.azure.com/org/Proj/", hasPat: true, patLast4: "abcd" };
+const ONPREM_CREDENTIAL: AdoCredential = { id: 2, projectName: "My Proj", projectUrl: "https://tfs.example.com/Coll/My%20Proj", hasPat: true, patLast4: null };
+const CREDENTIALS = [CLOUD_CREDENTIAL, ONPREM_CREDENTIAL];
 const CLOUD_SOURCE: PlanSource = {
   system: "Azure DevOps",
   project: "Proj",
@@ -38,14 +43,25 @@ function mockFetch(handler: Handler = () => json(makeBacklog())): Mock {
   return fetchMock;
 }
 
-function renderModal(source: PlanSource = CLOUD_SOURCE) {
-  const onClose = vi.fn();
-  const onBacklog = vi.fn();
-  const view = render(<AdoSyncModal open source={source} onClose={onClose} onBacklog={onBacklog} />);
-  return { onClose, onBacklog, ...view };
+/** Stands in for the sidebar's SettingsButton: shows whether the Settings modal was asked to open. */
+function SettingsProbe() {
+  const { settingsOpen } = useSettings();
+  return <p data-testid="settings-open">{String(settingsOpen)}</p>;
 }
 
-const patInput = () => screen.getByLabelText("Personal Access Token");
+function renderModal(source: PlanSource = CLOUD_SOURCE, credentials: AdoCredential[] = CREDENTIALS) {
+  const onClose = vi.fn();
+  const onBacklog = vi.fn();
+  const ui = (open: boolean) => (
+    <SignedIn credentials={credentials}>
+      <AdoSyncModal open={open} source={source} onClose={onClose} onBacklog={onBacklog} />
+      <SettingsProbe />
+    </SignedIn>
+  );
+  const view = render(ui(true));
+  return { onClose, onBacklog, ui, ...view };
+}
+
 const previewButton = () => screen.getByRole("button", { name: /^(Preview changes|Loading work items…)$/ });
 /** The `<dd>` shown next to a `<dt>` label. */
 const valueOf = (label: string) => screen.getByText(label, { selector: "dt" }).nextElementSibling?.textContent;
@@ -54,11 +70,15 @@ describe("AdoSyncModal", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("renders nothing when closed", () => {
-    render(<AdoSyncModal open={false} source={CLOUD_SOURCE} onClose={vi.fn()} onBacklog={vi.fn()} />);
+    render(
+      <SignedIn credentials={CREDENTIALS}>
+        <AdoSyncModal open={false} source={CLOUD_SOURCE} onClose={vi.fn()} onBacklog={vi.fn()} />
+      </SignedIn>,
+    );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows a Collaboration Hub Area-path connection read-only, with only the PAT editable", () => {
+  it("shows a Collaboration Hub Area-path connection read-only, with only the redacted read-only PAT input", () => {
     renderModal();
     const dialog = screen.getByRole("dialog", { name: "Sync from Azure DevOps" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
@@ -66,16 +86,9 @@ describe("AdoSyncModal", () => {
     expect(valueOf("Project URL")).toBe("https://dev.azure.com/org/Proj");
     expect(valueOf("Area path")).toBe("Proj\\Team A");
     expect(screen.queryByText("Iteration path")).not.toBeInTheDocument();
-    // The only form control is the PAT; no URL input, source/scope radios, tree or Connect step.
-    expect(screen.queryAllByRole("textbox")).toHaveLength(0);
-    expect(screen.queryAllByRole("radio")).toHaveLength(0);
-    expect(screen.queryByRole("tree")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
     expect(dialog.querySelectorAll("input")).toHaveLength(1);
-    expect(patInput()).toHaveFocus();
-    expect(patInput()).toHaveValue("");
-    expect(previewButton()).toHaveTextContent("Preview changes");
-    expect(previewButton()).toBeEnabled();
+    expect(dialog).not.toHaveTextContent("never stored");
+    expect(screen.queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
   });
 
   it("shows an On-Prem Iteration-path connection", () => {
@@ -86,38 +99,62 @@ describe("AdoSyncModal", () => {
     expect(screen.queryByText("Area path")).not.toBeInTheDocument();
   });
 
-  it("opts the PAT input out of autocomplete and password managers and describes it", () => {
+  it("names the matching Settings project (case-insensitive, trailing slash ignored) and enables Preview", () => {
     renderModal();
-    expect(patInput()).toHaveAttribute("type", "password");
-    expect(patInput()).toHaveAttribute("autocomplete", "off");
-    expect(patInput()).toHaveAttribute("data-1p-ignore", "true");
-    expect(patInput()).toHaveAttribute("data-lpignore", "true");
-    expect(patInput()).toHaveAttribute("data-form-type", "other");
-    expect(patInput()).toHaveAccessibleDescription("Needs the Work Items (Read) scope. It is sent only to connect and is never stored.");
+    const pat = screen.getByLabelText("Personal Access Token");
+    expect(pat).toHaveAttribute("type", "text");
+    expect(pat).toHaveAttribute("readonly");
+    expect(pat).toHaveValue("\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 abcd");
+    expect(screen.getByText(/Saved in Settings as/)).toHaveTextContent("Saved in Settings as Proj Saved");
+    expect(previewButton()).toBeEnabled();
   });
 
-  it("requires a PAT: inline error linked to the input, no request; typing clears it", async () => {
+  it("shows only the dots when the last 4 characters are unknown", () => {
+    renderModal(ONPREM_SOURCE);
+    expect(screen.getByLabelText("Personal Access Token")).toHaveValue("\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022");
+  });
+
+  it("without a matching project says so, disables Preview and opens Settings from 'Open settings'", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch();
-    const { onBacklog } = renderModal();
-    await user.type(patInput(), "   ");
-    await user.click(previewButton());
-    const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("Enter a Personal Access Token.");
-    expect(patInput()).toHaveAttribute("aria-invalid", "true");
-    expect(patInput().getAttribute("aria-describedby")?.split(" ")).toContain(alert.id);
+    renderModal(CLOUD_SOURCE, [ONPREM_CREDENTIAL]);
+    expect(screen.getByText("No saved Personal Access Token for this project.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Personal Access Token")).not.toBeInTheDocument();
+    expect(previewButton()).toBeDisabled();
+    expect(screen.getByTestId("settings-open")).toHaveTextContent("false");
+    await user.click(screen.getByRole("button", { name: "Open settings" }));
+    expect(screen.getByTestId("settings-open")).toHaveTextContent("true");
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(onBacklog).not.toHaveBeenCalled();
-    await user.type(patInput(), "x");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(patInput()).not.toHaveAttribute("aria-invalid");
   });
 
-  it("posts the plan's connection with the PAT and hands the backlog and connection (no PAT) to onBacklog", async () => {
+  it("loads the projects when it opens and offers Retry after a failure", async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        return calls === 1 ? json({ errors: ["boom"] }, 500) : json({ items: CREDENTIALS });
+      }),
+    );
+    render(
+      <SignedIn>
+        <AdoSyncModal open source={CLOUD_SOURCE} onClose={vi.fn()} onBacklog={vi.fn()} />
+      </SignedIn>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Loading your projects…");
+    expect(previewButton()).toBeDisabled();
+    expect(await screen.findByText("Could not load your projects.")).toBeInTheDocument();
+    expect(previewButton()).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByLabelText("Personal Access Token")).toBeInTheDocument();
+    expect(previewButton()).toBeEnabled();
+  });
+
+  it("posts the plan's connection without a PAT and hands the backlog and connection to onBacklog", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch();
     const { onBacklog } = renderModal(ONPREM_SOURCE);
-    await user.type(patInput(), PAT);
     await user.click(previewButton());
     await vi.waitFor(() => expect(onBacklog).toHaveBeenCalledTimes(1));
     const connection = { source: "onprem", projectUrl: "https://tfs.example.com/Coll/My%20Proj", scopeType: "iteration", scopePath: "My Proj\\Phase 1" };
@@ -125,46 +162,35 @@ describe("AdoSyncModal", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/ado/backlog");
-    expect(url).not.toContain(PAT);
     expect(init.method).toBe("POST");
-    expect(JSON.stringify(init.headers)).not.toContain(PAT);
-    expect(JSON.parse(String(init.body))).toEqual({ ...connection, pat: PAT });
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body).toEqual(connection);
+    expect(body).not.toHaveProperty("pat");
   });
 
-  it("submits with Enter in the PAT field", async () => {
-    const user = userEvent.setup();
-    const fetchMock = mockFetch();
-    const { onBacklog } = renderModal();
-    await user.type(patInput(), `${PAT}{Enter}`);
-    await vi.waitFor(() => expect(onBacklog).toHaveBeenCalledTimes(1));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows 'Loading work items…' while loading and a server error inline, keeping the modal and the PAT", async () => {
+  it("shows 'Loading work items…' while loading and a server error inline with a Settings hint, keeping the modal open", async () => {
     const user = userEvent.setup();
     let release: (r: Response) => void = () => undefined;
     mockFetch(() => new Promise<Response>((resolve) => (release = resolve)));
     const { onBacklog, onClose } = renderModal();
-    await user.type(patInput(), PAT);
     await user.click(previewButton());
     expect(previewButton()).toHaveTextContent("Loading work items…");
     expect(previewButton()).toBeDisabled();
-    release(json({ errors: ["Unknown Area path: Proj\\Team A."] }, 422));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Unknown Area path: Proj\\Team A.");
-    expect(patInput()).toHaveValue(PAT);
-    expect(patInput()).not.toHaveAttribute("aria-invalid");
+    release(json({ errors: ["The stored Personal Access Token has expired."] }, 422));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The stored Personal Access Token has expired.");
     expect(previewButton()).toHaveTextContent("Preview changes");
     expect(previewButton()).toBeEnabled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(onBacklog).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByTestId("settings-open")).toHaveTextContent("true");
   });
 
   it("shows a network failure inline", async () => {
     const user = userEvent.setup();
     mockFetch(() => Promise.reject(new TypeError("Failed to fetch")));
     renderModal();
-    await user.type(patInput(), PAT);
     await user.click(previewButton());
     expect(await screen.findByRole("alert")).not.toBeEmptyDOMElement();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -192,18 +218,16 @@ describe("AdoSyncModal", () => {
           }
         }),
     );
-    const { onBacklog, onClose, rerender } = renderModal();
-    await user.type(patInput(), PAT);
+    const { ui, rerender } = renderModal();
     await user.click(previewButton());
     expect(signals).toHaveLength(1);
     expect(signals[0].aborted).toBe(false);
-    rerender(<AdoSyncModal open={false} source={CLOUD_SOURCE} onClose={onClose} onBacklog={onBacklog} />);
+    rerender(ui(false));
     expect(signals[0].aborted).toBe(true);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    rerender(<AdoSyncModal open source={CLOUD_SOURCE} onClose={onClose} onBacklog={onBacklog} />);
-    expect(patInput()).toHaveValue("");
+    rerender(ui(true));
     expect(previewButton()).toBeEnabled();
-    expect(onBacklog).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -217,7 +241,6 @@ describe("AdoSyncModal", () => {
     const dialog = screen.getByRole("dialog", { name: "Sync from Azure DevOps" });
     expect(dialog).toHaveTextContent("This board isn't linked to an Azure DevOps project, so it can't be synced.");
     expect(dialog).toHaveTextContent("create the board from Azure DevOps");
-    expect(screen.queryByLabelText("Personal Access Token")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Preview changes" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Close"]);
     expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();

@@ -51,6 +51,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.auth.secret.name }}
                   key: {{ .Values.auth.secret.sessionSecretKey }}
+            - name: PAT_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.secret.name }}
+                  key: {{ .Values.auth.secret.patEncryptionKeyKey }}
             - name: DB_HOST
               value: cm-planning-hub-db-service
             - name: DB_PORT

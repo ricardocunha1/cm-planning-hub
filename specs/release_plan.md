@@ -27,11 +27,11 @@ After adding the Release Plan app inside CM Planning Hub, user must be able to s
 2. Create a new board by importing a previously exported JSON file.
 
 For 1., after the user clicks the card, a modal page opens where the user needs to:
-    - Select the AzureDevOps source - "On-Prem" or "Collaboration Hub" (online). Changing the source clears the project URL so the new source's placeholder shows (the PAT is kept).
-    - Select the AzureDevOps project URL (for example `https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/<PROJECT_NAME>` (On Prem) or `https://dev.azure.com/<ORGANIZATION_ID>/<PROJECT_NAME>` (Collaboration Hub))
-    - Enter a PAT Token (Personal Access Token) for authentication.
-    - After URL and Token are validated, the user can proceed to select either an   area path or an iteration path. One of the two MUST be selected.
+    - Select one of the Azure DevOps projects configured in Settings (project name, with its URL shown below). There is no source, URL or PAT field in this modal: the source is inferred from the URL host (`dev.azure.com` / `*.visualstudio.com` = Collaboration Hub, anything else On-Prem) and the server uses the signed-in user's PAT stored for that project (the request carries no PAT). The last connected project is remembered. With no projects configured the modal shows "No Azure DevOps projects configured yet." and an "Open settings" button, and Connect is disabled. A server error (e.g. no PAT stored for the project) is shown inline with a hint to edit the project in Settings.
+    - After the connection is validated, the user can proceed to select either an   area path or an iteration path. One of the two MUST be selected.
 - Select either an area path or an iteration path.
+
+"Sync from ADO" (on an existing board) shows the plan's stored connection (source, project URL, Area/Iteration path) read-only. The PAT is never editable: the request carries no PAT and the server uses the signed-in user's PAT stored for that project URL. The Settings project whose URL matches the plan's (case-insensitive, trailing slash ignored) is shown as a labelled, read-only "Personal Access Token" field holding only the redacted PAT ("••••••••" plus the last 4 characters, or only the dots when unknown) with the helper "Saved in Settings as <name>", and enables "Preview changes"; with no match the modal shows "No saved Personal Access Token for this project." with an "Open settings" button and Preview stays disabled. Server errors (e.g. missing or expired PAT) are shown inline with a hint to edit the project in Settings.
 
 For 2., after the user clicks the card, a modal page opens where the user needs to select the JSON file. The selected JSON file will be used to create a new board with the previously saved release plan.
 

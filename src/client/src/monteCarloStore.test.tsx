@@ -27,7 +27,10 @@ describe("monteCarloStore", () => {
 
   it("throws outside a ForecastProvider", () => {
     vi.spyOn(console, "error").mockImplementation(() => {}); // React logs the render error
+    const swallow = (event: ErrorEvent) => event.preventDefault(); // jsdom reports the render error on window
+    window.addEventListener("error", swallow);
     expect(() => renderHook(() => useForecast())).toThrow("useForecast must be used within a ForecastProvider");
+    window.removeEventListener("error", swallow);
     vi.restoreAllMocks();
   });
 });

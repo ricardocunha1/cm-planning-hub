@@ -31,7 +31,7 @@ COLUMNS_SQL = (
 
 def test_upgrade_creates_release_plans_columns(migrated_db):
     rows = {r[0]: r for r in query(migrated_db, COLUMNS_SQL)}
-    assert list(rows) == ["id", "name", "created_at", "updated_at", "project_type", "project_name", "state"]
+    assert list(rows) == ["id", "name", "created_at", "updated_at", "project_type", "project_name", "state", "owner_id"]
     assert rows["id"][1] == "integer"
     assert "nextval" in rows["id"][3]
     for name in ("name", "project_type", "project_name"):
@@ -40,7 +40,9 @@ def test_upgrade_creates_release_plans_columns(migrated_db):
         assert rows[name][1] == "timestamp with time zone"
         assert rows[name][3] == "now()"
     assert rows["state"][1] == "jsonb"
-    assert all(r[2] == "NO" for r in rows.values())
+    assert rows["owner_id"][1] == "integer"
+    assert rows["owner_id"][2] == "YES"
+    assert all(r[2] == "NO" for name, r in rows.items() if name != "owner_id")
 
 
 def test_upgrade_creates_updated_at_index(migrated_db):

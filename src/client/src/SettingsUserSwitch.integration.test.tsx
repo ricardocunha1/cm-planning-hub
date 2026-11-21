@@ -13,7 +13,7 @@ vi.mock("./authStore", () => ({ useAuth: () => ({ user: auth.user }) }));
 const A: AuthUser = { id: 1, name: "A", email: "a@example.com", pictureUrl: null };
 const B: AuthUser = { id: 2, name: "B", email: "b@example.com", pictureUrl: null };
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
-const cred = (id: number, projectName: string) => ({ id, projectName, projectUrl: `https://dev.azure.com/o/${projectName}`, hasPat: true });
+const cred = (id: number, projectName: string) => ({ id, projectName, projectUrl: `https://dev.azure.com/o/${projectName}`, hasPat: true, patLast4: null });
 
 function Probe() {
   const { items, status, ensureLoaded } = useSettings();

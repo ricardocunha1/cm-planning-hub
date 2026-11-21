@@ -1,6 +1,8 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { FlipIcon } from "./FlipIcon";
+import { PencilIcon } from "./PencilIcon";
+import { PlusIcon } from "./PlusIcon";
 import { SaveIcon } from "./SaveIcon";
 import { SettingsIcon } from "./SettingsIcon";
 import { SyncIcon } from "./SyncIcon";
@@ -10,6 +12,8 @@ describe.each([
   ["FlipIcon", FlipIcon],
   ["SaveIcon", SaveIcon],
   ["SettingsIcon", SettingsIcon],
+  ["PlusIcon", PlusIcon],
+  ["PencilIcon", PencilIcon],
 ] as const)("%s", (_name, Icon) => {
   it("renders a decorative, non-focusable svg that inherits the text color", () => {
     const { container } = render(<Icon />);

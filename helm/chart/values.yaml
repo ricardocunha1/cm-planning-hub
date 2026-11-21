@@ -23,7 +23,8 @@ postgres:
 # Register https://<public_http_address>/api/auth/callback as an authorized redirect URI, then:
 #   oc -n cm-planning-hub create secret generic cm-planning-hub-auth-secret \
 #     --from-literal=googleClientId=<id> --from-literal=googleClientSecret=<secret> \
-#     --from-literal=sessionSecret=$(openssl rand -hex 32)
+#     --from-literal=sessionSecret=$(openssl rand -hex 32) \
+#     --from-literal=patEncryptionKey=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 auth:
   # Comma-separated e-mail domains allowed to sign in; empty = any verified Google account
   allowedEmailDomains: ""
@@ -33,3 +34,4 @@ auth:
     googleClientIdKey: googleClientId
     googleClientSecretKey: googleClientSecret
     sessionSecretKey: sessionSecret
+    patEncryptionKeyKey: patEncryptionKey

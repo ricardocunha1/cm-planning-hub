@@ -11,7 +11,8 @@ import { ADO_CONNECTION_KEY } from "../lib/releasePlan/constants";
 import type { ReleasePlan } from "../lib/releasePlan/types";
 import { normalizePlan } from "../lib/releasePlan/validate";
 import { ForecastProvider } from "../monteCarloStore";
-import { makeBacklog, makeConnectResponse } from "../test/adoFixtures";
+import { SettingsProvider } from "../settingsStore";
+import { makeBacklog, makeConnectResponse, MY_PROJ_CREDENTIAL } from "../test/adoFixtures";
 import { AuthProvider } from "../authStore";
 import { TEST_USER } from "../test/authFixtures";
 
@@ -21,9 +22,7 @@ vi.mock("../lib/releasePlan/planApi", async (importOriginal) => ({
   listPlans: vi.fn(async () => ({ items: [], total: 0, page: 1, pageSize: 10 })),
 }));
 
-const PAT = "qa-secret-pat-0123456789";
 const CANONICAL = "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/My%20Proj";
-const TYPED = "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/My%20Proj/_backlogs/backlog/?a=1";
 const TIMEOUT = 30_000;
 const FIND = { timeout: 5_000 };
 
@@ -49,9 +48,11 @@ function renderApp(path: string) {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider initialItems={[MY_PROJ_CREDENTIAL]}>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );
@@ -119,24 +120,14 @@ function mockNetwork(
   return { fetchMock, held, signals };
 }
 
-function allLocalStorage(): string {
-  return Object.keys(window.localStorage)
-    .map((k) => `${k}=${window.localStorage.getItem(k)}`)
-    .join("\n");
-}
-
 
 async function openAdoFromHome(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /Create from Azure DevOps/ }));
   return adoDialog();
 }
 
-async function fillConnection(user: ReturnType<typeof userEvent.setup>, { url = TYPED, pat = PAT } = {}) {
-  const dialog = adoDialog();
-  await user.click(within(dialog).getByRole("radio", { name: "On-Prem" }));
-  await user.clear(within(dialog).getByLabelText("Project URL"));
-  await user.type(within(dialog).getByLabelText("Project URL"), url);
-  await user.type(within(dialog).getByLabelText("Personal Access Token"), pat);
+async function fillConnection(user: ReturnType<typeof userEvent.setup>) {
+  await user.selectOptions(within(adoDialog()).getByLabelText("Project"), "My Proj");
 }
 
 async function connect(user: ReturnType<typeof userEvent.setup>) {
@@ -171,7 +162,7 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     window.localStorage.clear();
   });
 
-  it("hub home → Release Plan → ADO modal → connect → pick path → create → board; persists plan + connection, never the PAT; survives a reload", async () => {
+  it("hub home → Release Plan → ADO modal → connect → pick path → create → board; persists plan + connection, no PAT is sent; survives a reload", async () => {
     const user = userEvent.setup();
     const warning = "Neither Custom.EstimatedSize nor Custom.FeatureSize exists in this project; sizes are empty.";
     const { fetchMock } = mockNetwork({
@@ -214,26 +205,24 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect(toasts.some((t) => t.includes("Only the first 20000 work items were loaded"))).toBe(true);
     expect(toasts.some((t) => t.includes("Restored your last session"))).toBe(false);
 
-    // Requests: PAT only in the JSON bodies, typed URL sent to connect, canonical URL to backlog, then the plan is saved.
+    // Requests: no PAT anywhere, the stored project URL sent to connect and backlog, then the plan is saved.
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
-    for (const [url, init] of calls) {
-      expect(url).not.toContain(PAT);
+    for (const [, init] of calls) {
       expect(init.method).toBe("POST");
-      expect(JSON.stringify(init.headers ?? {})).not.toContain(PAT);
+      expect(String(init.body)).not.toContain('"pat"');
     }
-    expect(JSON.parse(String(calls[0][1].body))).toEqual({ source: "onprem", projectUrl: TYPED, pat: PAT });
+    expect(JSON.parse(String(calls[0][1].body))).toEqual({ source: "onprem", projectUrl: CANONICAL });
     expect(JSON.parse(String(calls[1][1].body))).toEqual({
       source: "onprem",
       projectUrl: CANONICAL,
-      pat: PAT,
       scopeType: "iteration",
       scopePath: "Proj\\Phase 1\\Sprint 02",
     });
     expect(calls[2][0]).toBe("/api/plan");
     expect(JSON.parse(String(calls[2][1].body))).toMatchObject({ name: "My Proj – Feature Release Plan", projectType: "onprem", projectName: "My Proj" });
 
-    // Persistence: the plan (with the connection in source) is POSTed and the connection remembered; the PAT is stored nowhere.
+    // Persistence: the plan (with the connection in source) is POSTed and the connection remembered.
     const saved = (JSON.parse(String(calls[2][1].body)) as { state: ReleasePlan }).state;
     expect(saved.source).toEqual({
       system: "Azure DevOps",
@@ -247,7 +236,6 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     });
     expect(normalizePlan(saved)).toEqual(saved);
     expect(JSON.parse(window.localStorage.getItem(ADO_CONNECTION_KEY)!)).toEqual({ source: "onprem", projectUrl: CANONICAL });
-    expect(allLocalStorage()).not.toContain(PAT);
 
     // The synthetic Epic opens in the work-item modal like any Epic.
     await user.click(within(board).getByRole("button", { name: /Features without an Epic/ }));
@@ -255,20 +243,18 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect(wi).toHaveTextContent("No description in Azure DevOps.");
     await user.keyboard("{Escape}");
 
-    // "Reload": a fresh App loads the board from the server; the modal is pre-filled without the PAT.
+    // "Reload": a fresh App loads the board from the server; the modal pre-selects the remembered project.
     view.unmount();
     renderApp("/release-plan/42");
     expect(await screen.findByLabelText("Plan name", undefined, FIND)).toHaveValue("My Proj – Feature Release Plan");
     await user.click(within(screen.getByRole("navigation", { name: "Hub navigation" })).getByRole("link", { name: "Release Plan" }));
     expect(location()).toBe("/release-plan");
     await openAdoFromHome(user);
-    expect(within(adoDialog()).getByRole("radio", { name: "On-Prem" })).toBeChecked();
-    expect(within(adoDialog()).getByLabelText("Project URL")).toHaveValue(CANONICAL);
-    expect(within(adoDialog()).getByLabelText("Personal Access Token")).toHaveValue("");
+    expect(within(adoDialog()).getByLabelText("Project")).toHaveValue("21");
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
   });
 
-  it("ignores a Connect response that arrives after the URL was edited (no tree, nothing remembered)", async () => {
+  it("ignores a Connect response that arrives after the project was changed (no tree, nothing remembered)", async () => {
     const user = userEvent.setup();
     const { held, fetchMock } = mockNetwork({ hold: "connect", ignoreAbort: true });
     renderApp("/release-plan");
@@ -278,8 +264,8 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect(within(adoDialog()).getByRole("button", { name: "Connecting…" })).toBeDisabled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // Edit while in flight, then the stale response lands.
-    await user.type(within(adoDialog()).getByLabelText("Project URL"), "x");
+    // Change the selection while in flight, then the stale response lands.
+    await user.selectOptions(within(adoDialog()).getByLabelText("Project"), "");
     await act(async () => held[0].resolve(json(connectResponse())));
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
     expect(within(adoDialog()).getByRole("button", { name: "Connect" })).toBeEnabled();
@@ -295,7 +281,7 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     await openAdoFromHome(user);
     await fillConnection(user);
     await connect(user);
-    await user.click(within(adoDialog()).getByLabelText("Personal Access Token"));
+    within(adoDialog()).getByLabelText("Project").focus();
     // Enter in a field would submit the form again; the busy guard must stop it without editing anything.
     await user.keyboard("{Enter}");
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -325,14 +311,13 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     expect(toastTexts().some((t) => t.includes("Plan created"))).toBe(false);
     expect(card).toHaveFocus();
 
-    // Reopening starts fresh: URL pre-filled from the remembered connection, PAT forgotten, no tree.
+    // Reopening starts fresh: no tree (the project is only remembered after a successful Connect).
     await openAdoFromHome(user);
-    expect(within(adoDialog()).getByLabelText("Project URL")).toHaveValue(CANONICAL);
-    expect(within(adoDialog()).getByLabelText("Personal Access Token")).toHaveValue("");
+    expect(within(adoDialog()).getByLabelText("Project")).toHaveValue("21");
     expect(screen.queryByRole("tree")).not.toBeInTheDocument();
   });
 
-  it("shows a backlog 422 inline, keeps the modal, path and PAT, and creates nothing", async () => {
+  it("shows a backlog 422 inline, keeps the modal and path, and creates nothing", async () => {
     const user = userEvent.setup();
     const { fetchMock } = mockNetwork({ backlog: () => json({ errors: ["Unknown Iteration path: Proj\\Phase 1\\Sprint 02."] }, 422) });
     renderApp("/release-plan");
@@ -342,7 +327,6 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     await pickSprint02(user);
     await user.click(within(adoDialog()).getByRole("button", { name: "Create board" }));
     expect(await within(adoDialog()).findByRole("alert", {}, FIND)).toHaveTextContent("Unknown Iteration path: Proj\\Phase 1\\Sprint 02.");
-    expect(within(adoDialog()).getByLabelText("Personal Access Token")).toHaveValue(PAT);
     expect(within(adoDialog()).getByTestId("ado-selected-path")).toHaveTextContent("Proj\\Phase 1\\Sprint 02");
     expect(within(adoDialog()).getByRole("button", { name: "Create board" })).toBeEnabled();
     expect(location()).toBe("/release-plan");
@@ -373,21 +357,16 @@ describe("Release Plan – create from Azure DevOps (integration)", { timeout: T
     await connect(user);
     expect(await within(adoDialog()).findByRole("alert", {}, FIND)).toHaveTextContent("Could not reach the server: Failed to fetch");
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(within(adoDialog()).getByLabelText("Personal Access Token")).toHaveValue(PAT);
+    expect(within(adoDialog()).getByLabelText("Project")).toHaveValue("21");
   });
 
-  it("checks the URL shape for the selected source client-side, with the server's message and no request", async () => {
+  it("asks to select a project (no request) before Connect", async () => {
     const user = userEvent.setup();
     const { fetchMock } = mockNetwork();
     renderApp("/release-plan");
     await openAdoFromHome(user);
-    await user.click(within(adoDialog()).getByRole("radio", { name: "Collaboration Hub" }));
-    await user.type(within(adoDialog()).getByLabelText("Project URL"), CANONICAL);
-    await user.type(within(adoDialog()).getByLabelText("Personal Access Token"), PAT);
     await connect(user);
-    expect(within(adoDialog()).getByRole("alert")).toHaveTextContent(
-      "Collaboration Hub URLs look like https://dev.azure.com/<organization>/<project>.",
-    );
+    expect(within(adoDialog()).getByRole("alert")).toHaveTextContent("Select an Azure DevOps project.");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

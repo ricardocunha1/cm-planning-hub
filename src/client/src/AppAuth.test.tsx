@@ -6,6 +6,7 @@ import { appRoutes } from "./App";
 import { AuthProvider } from "./authStore";
 import { ToastProvider } from "./components/Toast";
 import { ForecastProvider } from "./monteCarloStore";
+import { SettingsProvider } from "./settingsStore";
 import { TEST_USER } from "./test/authFixtures";
 import { renderApp } from "./test/renderApp";
 import { ProbeLayout } from "./test/render";
@@ -58,9 +59,11 @@ describe("session check", () => {
     render(
       <ToastProvider>
         <AuthProvider>
-          <ForecastProvider>
-            <RouterProvider router={router} />
-          </ForecastProvider>
+          <SettingsProvider>
+            <ForecastProvider>
+              <RouterProvider router={router} />
+            </ForecastProvider>
+          </SettingsProvider>
         </AuthProvider>
       </ToastProvider>,
     );

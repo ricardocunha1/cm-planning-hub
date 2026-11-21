@@ -13,7 +13,8 @@ import { planReducer } from "../lib/releasePlan/reducer";
 import { NO_EPIC_ID, type ReleasePlan } from "../lib/releasePlan/types";
 import { normalizePlan } from "../lib/releasePlan/validate";
 import { ForecastProvider } from "../monteCarloStore";
-import { makeBacklog, makeConnectResponse, makeConnection, makeEpicItem, makeFeatureItem } from "../test/adoFixtures";
+import { SettingsProvider } from "../settingsStore";
+import { makeBacklog, makeConnectResponse, makeConnection, makeEpicItem, makeFeatureItem, MY_PROJ_CREDENTIAL } from "../test/adoFixtures";
 import { disableAutosave } from "../test/planServer";
 import { samplePlan, sequentialIds } from "../test/releasePlanFixtures";
 import { AuthProvider } from "../authStore";
@@ -25,7 +26,6 @@ vi.mock("../lib/releasePlan/planApi", async (importOriginal) => ({
   listPlans: vi.fn(async () => ({ items: [], total: 0, page: 1, pageSize: 10 })),
 }));
 
-const PAT = "qa-sync-secret-pat-9876543210";
 const CANONICAL = "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/My%20Proj";
 const PROJECT = { id: "guid-1", name: "My Proj" };
 const TIMEOUT = 30_000;
@@ -53,9 +53,11 @@ function renderApp(path: string) {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider initialItems={[MY_PROJ_CREDENTIAL]}>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );
@@ -148,10 +150,6 @@ async function storedPlan(user: User): Promise<ReleasePlan> {
   return serverPlan;
 }
 const saveStatus = () => screen.getByTestId("save-status").textContent;
-const allLocalStorage = () =>
-  Object.keys(window.localStorage)
-    .map((k) => `${k}=${window.localStorage.getItem(k)}`)
-    .join("\n");
 const layoutOf = (plan: ReleasePlan) => plan.epics.map((e) => [e.id, e.features.map((f) => f.id)]);
 const milestoneOf = (plan: ReleasePlan, id: number) => plan.epics.flatMap((e) => e.features).find((f) => f.id === id)?.milestoneId;
 const epicTitles = () => [...screen.getByRole("region", { name: "Board" }).querySelectorAll(".epic .name > span:first-child")].map((e) => e.textContent);
@@ -162,14 +160,11 @@ function spyPlanSaves() {
   return () => putCount - start;
 }
 
-/** Home → "Create from Azure DevOps" → On-Prem + URL + PAT → Connect → Area "Team A" → Create board. */
+/** Home → "Create from Azure DevOps" → project → Connect → Area "Team A" → Create board. */
 async function createFromAdo(user: User) {
   await user.click(screen.getByRole("button", { name: /Create from Azure DevOps/ }));
   const dialog = screen.getByRole("dialog", { name: "Create from Azure DevOps" });
-  await user.click(within(dialog).getByRole("radio", { name: "On-Prem" }));
-  await user.clear(within(dialog).getByLabelText("Project URL"));
-  await user.type(within(dialog).getByLabelText("Project URL"), CANONICAL);
-  await user.type(within(dialog).getByLabelText("Personal Access Token"), PAT);
+  await user.selectOptions(within(dialog).getByLabelText("Project"), "My Proj");
   await user.click(within(dialog).getByRole("button", { name: "Connect" }));
   const tree = await within(dialog).findByRole("tree", { name: "Area path" }, FIND);
   await user.click(within(tree).getByRole("treeitem", { name: /^Team A/ }));
@@ -180,7 +175,7 @@ async function createFromAdo(user: User) {
 /** Read-only value shown next to a label in the sync dialog. */
 const shownValue = (dialog: HTMLElement, label: string) => within(dialog).getByText(label, { selector: "dt" }).nextElementSibling?.textContent;
 
-/** Toolbar "Sync from ADO" → (connection shown read-only from the plan) → PAT → Preview changes. */
+/** Toolbar "Sync from ADO" → (connection shown read-only from the plan) → Preview changes. */
 async function openSyncPreview(user: User) {
   await user.click(within(toolbar()).getByRole("button", { name: "Sync from ADO" }));
   const dialog = syncDialog();
@@ -188,8 +183,10 @@ async function openSyncPreview(user: User) {
   expect(shownValue(dialog, "Project URL")).toBe(CANONICAL);
   expect(shownValue(dialog, "Area path")).toBe("Proj\\Team A");
   expect(within(dialog).queryAllByRole("radio")).toHaveLength(0);
-  expect(within(dialog).getByLabelText("Personal Access Token")).toHaveValue("");
-  await user.type(within(dialog).getByLabelText("Personal Access Token"), PAT);
+  const pat = within(dialog).getByLabelText("Personal Access Token");
+  expect(pat).toHaveAttribute("readonly");
+  expect(pat).toHaveValue("\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 6789");
+  expect(within(dialog).getByText(/Saved in Settings as/)).toHaveTextContent("My Proj");
   await user.click(within(dialog).getByRole("button", { name: "Preview changes" }));
   await screen.findByRole("button", { name: "Apply" }, FIND);
   return syncDialog();
@@ -279,7 +276,6 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
       const toasts = toastTexts();
       expect(toasts.some((t) => t.includes("Board synchronized with Azure DevOps"))).toBe(true);
       expect(toasts.some((t) => t.includes("Neither Custom.EstimatedSize nor Custom.FeatureSize exists"))).toBe(true);
-      expect(allLocalStorage()).not.toContain(PAT);
       // connect + backlog (create), backlog (sync); the other requests are plan POST/PUTs.
       expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/ado/"))).toHaveLength(3);
 
@@ -340,7 +336,7 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
     expect(saveStatus()).toBe("Saved");
   });
 
-  it("a backlog 422 during sync shows inline in the dialog, keeps the PAT, opens no preview and changes nothing", async () => {
+  it("a backlog 422 during sync shows inline in the dialog, opens no preview and changes nothing", async () => {
     const user = userEvent.setup();
     mockNetwork([() => json(initialBacklog()), () => json({ errors: ["Unknown Area path: Proj\\Team A."] }, 422)]);
     renderApp("/release-plan");
@@ -349,15 +345,12 @@ describe("Release Plan – Sync from Azure DevOps (integration)", { timeout: TIM
 
     await user.click(within(toolbar()).getByRole("button", { name: "Sync from ADO" }));
     const dialog = syncDialog();
-    await user.type(within(dialog).getByLabelText("Personal Access Token"), PAT);
     await user.click(within(dialog).getByRole("button", { name: "Preview changes" }));
     expect(await within(dialog).findByRole("alert", {}, FIND)).toHaveTextContent("Unknown Area path: Proj\\Team A.");
-    expect(within(dialog).getByLabelText("Personal Access Token")).toHaveValue(PAT);
     expect(shownValue(dialog, "Area path")).toBe("Proj\\Team A");
     expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
     expect(serverPlan).toBe(before);
     expect(saveStatus()).toBe("Saved");
-    expect(allLocalStorage()).not.toContain(PAT);
   });
 
   it("a Sprints-mode plan: sprints, flags and every Feature's sprint survive; new Features Unplanned; iterations replaced", async () => {

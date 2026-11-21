@@ -3,8 +3,11 @@ from collections.abc import AsyncIterator
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_user
 from app.config import Settings, get_settings
+from app.db import get_session
 from app.schemas import (
     AdoBacklogRequest,
     AdoBacklogResponse,
@@ -17,9 +20,10 @@ from app.schemas import (
 from app.services.ado_backlog import connect as ado_connect
 from app.services.ado_backlog import fetch_backlog, scope_field_errors
 from app.services.ado_client import UNEXPECTED_RESPONSE, AdoError
-from app.services.ado_http import ado_client, ado_http_client
+from app.services.ado_http import ado_client, ado_http_client, resolve_pat
 from app.services.ado_sprint_history import fetch_sprint_history, iteration_path_errors
 from app.services.ado_url import AdoUrlError, connection_field_errors
+from app.services.credentials import CredentialsUnavailableError, StoredPatUnreadableError
 
 router = APIRouter()
 
@@ -38,6 +42,14 @@ def _errors(messages: list[str]) -> JSONResponse:
     are replaced, so rendering the error itself can never fail."""
     safe = [m.encode("utf-8", "replace").decode("utf-8") for m in messages]
     return JSONResponse(status_code=422, content={"errors": safe})
+
+
+def _credential_error(exc: CredentialsUnavailableError | StoredPatUnreadableError) -> JSONResponse:
+    """The saved-PAT lookup failed: 503 when the server's encryption key is
+    unusable, 422 when the saved PAT cannot be decrypted. Never the PAT."""
+    if isinstance(exc, CredentialsUnavailableError):
+        return JSONResponse(status_code=503, content={"errors": [str(exc)]})
+    return _errors([str(exc)])
 
 
 def _request_body(model: type) -> dict:
@@ -72,9 +84,15 @@ async def connect(
     request: Request,
     settings: Settings = Depends(get_settings),
     http: httpx.AsyncClient = Depends(get_ado_http_client),
+    session: AsyncSession = Depends(get_session),
+    user_id: int | None = Depends(require_user),
 ):
-    """JSON `{source, projectUrl, pat}`: validates the URL and the PAT and
+    """JSON `{source, projectUrl, pat?}`: validates the URL and the PAT and
     returns the project with its Area and Iteration trees.
+
+    `pat` is optional: when absent or blank the signed-in user's saved PAT for
+    the project's canonical URL is used (see `resolve_pat`); a PAT in the
+    request always wins. With neither, the answer is a 422.
 
     The body is read manually rather than as a Pydantic body param so
     missing/blank fields produce the API contract's messages (all failing
@@ -87,16 +105,19 @@ async def connect(
     "unexpected response", never a 500.
     """
     data = await _read_json_object(request)
-    errors = connection_field_errors(data)
+    errors = connection_field_errors(data, pat_required=False)
     if errors:
         return _errors(errors)
     payload = AdoConnectRequest.model_validate(data)
 
     try:
-        project, client = ado_client(payload, settings, http)
+        pat = await resolve_pat(payload, settings, session, user_id)
+        project, client = ado_client(payload, settings, http, pat)
         return await ado_connect(client, project)
     except (AdoUrlError, AdoError) as exc:
         return _errors([str(exc)])
+    except (CredentialsUnavailableError, StoredPatUnreadableError) as exc:
+        return _credential_error(exc)
     except (UnicodeError, RecursionError):
         return _errors([UNEXPECTED_RESPONSE])
 
@@ -111,8 +132,10 @@ async def backlog(
     request: Request,
     settings: Settings = Depends(get_settings),
     http: httpx.AsyncClient = Depends(get_ado_http_client),
+    session: AsyncSession = Depends(get_session),
+    user_id: int | None = Depends(require_user),
 ):
-    """JSON `{source, projectUrl, pat, scopeType, scopePath}`: the Epics and
+    """JSON `{source, projectUrl, pat?, scopeType, scopePath}`: the Epics and
     Features under the chosen Area or Iteration path, plus the iterations.
 
     Validated like `connect` (same messages, all failing fields together),
@@ -120,18 +143,21 @@ async def backlog(
     `scopeType` or a blank `scopePath`.
     """
     data = await _read_json_object(request)
-    errors = connection_field_errors(data) + scope_field_errors(data)
+    errors = connection_field_errors(data, pat_required=False) + scope_field_errors(data)
     if errors:
         return _errors(errors)
     payload = AdoBacklogRequest.model_validate(data)
 
     try:
-        project, client = ado_client(payload, settings, http)
+        pat = await resolve_pat(payload, settings, session, user_id)
+        project, client = ado_client(payload, settings, http, pat)
         return await fetch_backlog(
             client, project, payload.scope_type, payload.scope_path, settings.ado_description_max_chars
         )
     except (AdoUrlError, AdoError) as exc:
         return _errors([str(exc)])
+    except (CredentialsUnavailableError, StoredPatUnreadableError) as exc:
+        return _credential_error(exc)
     except (UnicodeError, RecursionError):
         return _errors([UNEXPECTED_RESPONSE])
 
@@ -146,8 +172,10 @@ async def sprint_history(
     request: Request,
     settings: Settings = Depends(get_settings),
     http: httpx.AsyncClient = Depends(get_ado_http_client),
+    session: AsyncSession = Depends(get_session),
+    user_id: int | None = Depends(require_user),
 ):
-    """JSON `{source, projectUrl, pat, iterationPath}`: the resolved User
+    """JSON `{source, projectUrl, pat?, iterationPath}`: the resolved User
     Stories and Bugs under the chosen Iteration path, the Monte Carlo sprint
     history (its `workItems` are posted to /api/validate as
     `sprint_history_items`).
@@ -156,15 +184,18 @@ async def sprint_history(
     plus "Choose an Iteration path." for a missing or blank `iterationPath`.
     """
     data = await _read_json_object(request)
-    errors = connection_field_errors(data) + iteration_path_errors(data)
+    errors = connection_field_errors(data, pat_required=False) + iteration_path_errors(data)
     if errors:
         return _errors(errors)
     payload = AdoSprintHistoryRequest.model_validate(data)
 
     try:
-        project, client = ado_client(payload, settings, http)
+        pat = await resolve_pat(payload, settings, session, user_id)
+        project, client = ado_client(payload, settings, http, pat)
         return await fetch_sprint_history(client, project, payload.iteration_path)
     except (AdoUrlError, AdoError) as exc:
         return _errors([str(exc)])
+    except (CredentialsUnavailableError, StoredPatUnreadableError) as exc:
+        return _credential_error(exc)
     except (UnicodeError, RecursionError):
         return _errors([UNEXPECTED_RESPONSE])

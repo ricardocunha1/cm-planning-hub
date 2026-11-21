@@ -17,6 +17,9 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 SOURCE_REQUIRED = "Choose the Azure DevOps source (On-Prem or Collaboration Hub)."
 URL_REQUIRED = "Enter the Azure DevOps project URL."
 PAT_REQUIRED = "Enter a Personal Access Token."
+PAT_OR_SAVED_REQUIRED = (
+    "A Personal Access Token is required: enter one, or save one for this project in Settings."
+)
 HTTPS_REQUIRED = "The URL must start with https://."
 CLOUD_SHAPE = "Collaboration Hub URLs look like https://dev.azure.com/<organization>/<project>."
 ONPREM_SHAPE = "On-Prem URLs look like https://<server>/<collection>/<project>."
@@ -45,18 +48,23 @@ class AdoProject:
         return urlsplit(self.base_url).hostname or ""
 
 
-def connection_field_errors(data: Mapping[str, Any]) -> list[str]:
+def connection_field_errors(data: Mapping[str, Any], *, pat_required: bool = True) -> list[str]:
     """Missing/blank checks for the common `/api/ado/*` request part.
 
     Every failing field is reported at once, in field order (source, URL,
-    PAT), like /api/validate reports all its form errors together.
+    PAT), like /api/validate reports all its form errors together. With
+    `pat_required` false (the REST routes, which fall back to the user's saved
+    PAT) an absent, null or blank `pat` passes; any other non-string is still
+    reported.
     """
     errors: list[str] = []
     if data.get("source") not in SOURCES:
         errors.append(SOURCE_REQUIRED)
     if not _non_blank(data.get("projectUrl")):
         errors.append(URL_REQUIRED)
-    if not _non_blank(data.get("pat")):
+    pat = data.get("pat")
+    absent = pat is None or (isinstance(pat, str) and not pat.strip())
+    if not _non_blank(pat) and (pat_required or not absent):
         errors.append(PAT_REQUIRED)
     return errors
 

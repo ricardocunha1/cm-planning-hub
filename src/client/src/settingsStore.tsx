@@ -22,6 +22,12 @@ export interface SettingsState {
   update: (id: number, body: AdoCredentialUpdate) => Promise<AdoCredential>;
   /** Deletes a credential; rejects with the ApiError. */
   remove: (id: number) => Promise<void>;
+  /** Whether the Settings modal (rendered by `SettingsButton`) is open. */
+  settingsOpen: boolean;
+  /** Opens the Settings modal from anywhere (e.g. the Azure DevOps connect modal when no project is configured). */
+  openSettings: () => void;
+  /** Closes the Settings modal. */
+  closeSettings: () => void;
 }
 
 const SettingsContext = createContext<SettingsState | null>(null);
@@ -38,6 +44,9 @@ export function SettingsProvider({ children, initialItems }: { children: ReactNo
   const userId = user?.id ?? null;
   const [items, setItems] = useState<AdoCredential[]>(initialItems ?? []);
   const [status, setStatus] = useState<SettingsStatus>(initialItems ? "ready" : "idle");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const statusRef = useRef(status);
   statusRef.current = status;
   /** Bumped on reset so a response for a previous user is ignored. */
@@ -98,8 +107,8 @@ export function SettingsProvider({ children, initialItems }: { children: ReactNo
   }, []);
 
   const value = useMemo<SettingsState>(
-    () => ({ items, status, load, ensureLoaded, add, update, remove }),
-    [items, status, load, ensureLoaded, add, update, remove],
+    () => ({ items, status, load, ensureLoaded, add, update, remove, settingsOpen, openSettings, closeSettings }),
+    [items, status, load, ensureLoaded, add, update, remove, settingsOpen, openSettings, closeSettings],
   );
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }

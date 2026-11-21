@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from ado_fakes import FAKE_PAT, PROJECT_ID, PROJECT_NAME, FakeAdo, classification_nodes, work_item
 from app.api import ado_routes
+from app.api.ado_routes import get_ado_http_client
 from app.config import get_settings
 from app.main import app
 from app.schemas import AdoBacklogResponse
@@ -71,7 +72,9 @@ def env_settings(monkeypatch):
 def transport(monkeypatch, fake, env_settings):
     patch = TransportPatch(fake)
     monkeypatch.setattr(ado_routes.httpx, "AsyncClient", patch)
-    app.dependency_overrides.clear()
+    # Drop only the overrides other modules may leak; keep the autouse auth/session bypass.
+    app.dependency_overrides.pop(get_ado_http_client, None)
+    app.dependency_overrides.pop(get_settings, None)
     return patch
 
 
@@ -287,7 +290,7 @@ def test_undecodable_response_body_is_a_422_not_a_500(lenient_client, transport)
 def test_form_encoded_body_gets_the_field_messages(client, fake):
     response = client.post("/api/ado/connect", data={"source": "cloud", "projectUrl": CLOUD_URL, "pat": FAKE_PAT})
     assert response.status_code == 422
-    assert len(response.json()["errors"]) == 3
+    assert len(response.json()["errors"]) == 2  # source and URL; the PAT is optional now
     assert fake.requests == []
     _assert_no_pat(response.text)
 
@@ -329,9 +332,9 @@ def test_openapi_documents_the_connect_route(client):
     spec = client.get("/openapi.json").json()
     operation = spec["paths"]["/api/ado/connect"]["post"]
     body_schema = operation["requestBody"]["content"]["application/json"]["schema"]
-    assert set(body_schema["required"]) == {"source", "projectUrl", "pat"}
+    assert set(body_schema["required"]) == {"source", "projectUrl"}
     assert body_schema["properties"]["source"]["enum"] == ["onprem", "cloud"]
-    assert body_schema["properties"]["pat"]["writeOnly"] is True
+    assert any(option.get("writeOnly") for option in body_schema["properties"]["pat"]["anyOf"])
     assert operation["responses"]["422"]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
     response_ref = operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
     response_schema = spec["components"]["schemas"][response_ref.rsplit("/", 1)[-1]]
@@ -511,7 +514,7 @@ def test_request_body_nested_beyond_the_decoder_limit_gets_the_field_messages(le
     raw = "[" * 200_000 + "]" * 200_000
     response = _post_raw(lenient_client, raw)
     assert response.status_code == 422, response.text[:200]
-    assert len(response.json()["errors"]) == 3
+    assert len(response.json()["errors"]) == 2
     assert fake.requests == []
 
 
@@ -766,7 +769,6 @@ def test_backlog_field_errors_come_before_the_allowlist_and_any_request(client, 
     assert response.json() == {
         "errors": [
             "Choose the Azure DevOps source (On-Prem or Collaboration Hub).",
-            "Enter a Personal Access Token.",
             "Choose an Area path or an Iteration path.",
         ]
     }
@@ -1042,9 +1044,9 @@ def test_openapi_documents_the_backlog_route(client):
     spec = client.get("/openapi.json").json()
     operation = spec["paths"]["/api/ado/backlog"]["post"]
     body = operation["requestBody"]["content"]["application/json"]["schema"]
-    assert set(body["required"]) == {"source", "projectUrl", "pat", "scopeType", "scopePath"}
+    assert set(body["required"]) == {"source", "projectUrl", "scopeType", "scopePath"}
     assert body["properties"]["scopeType"]["enum"] == ["area", "iteration"]
-    assert body["properties"]["pat"]["writeOnly"] is True
+    assert any(option.get("writeOnly") for option in body["properties"]["pat"]["anyOf"])
     assert operation["responses"]["422"]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
     ref = operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
     schema = spec["components"]["schemas"][ref.rsplit("/", 1)[-1]]

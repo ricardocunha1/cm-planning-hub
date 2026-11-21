@@ -5,7 +5,7 @@ import type { AdoBacklog } from "../lib/releasePlan/adoTypes";
 import { planFromBacklog } from "../lib/releasePlan/fromBacklog";
 import type { ReleasePlan } from "../lib/releasePlan/types";
 import { FakeImage, RecordingContext, stubCanvas } from "../test/canvas";
-import { makeBacklog, makeConnection, makeFeatureItem } from "../test/adoFixtures";
+import { ADO_CREDENTIALS, makeBacklog, makeConnection, makeFeatureItem } from "../test/adoFixtures";
 import { makeEpic, makeFeature, samplePlan, sequentialIds, sprintsPlan } from "../test/releasePlanFixtures";
 import { BOARD_TEST_TIMEOUT_MS, renderBoard } from "../test/renderBoard";
 
@@ -243,7 +243,6 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
   });
 
   describe("Sync from ADO", () => {
-    const PAT = "sync-pat-value";
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
     /** The board created from the default backlog (Epic 101: 102, 104; Epic 103: 105; synthetic: 106, 107). */
     const adoPlan = () => planFromBacklog(makeBacklog(), makeConnection(), sequentialIds());
@@ -277,10 +276,9 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
       return fetchMock;
     }
 
-    /** Toolbar → sync dialog (connection read-only from plan.source) → PAT → Preview changes → the preview dialog. */
+    /** Toolbar → sync dialog (connection read-only from plan.source) → Preview changes → the preview dialog. */
     async function openPreview(user: ReturnType<typeof userEvent.setup>) {
       await user.click(screen.getByRole("button", { name: "Sync from ADO" }));
-      await user.type(within(connectDialog()).getByLabelText("Personal Access Token"), PAT);
       await user.click(within(connectDialog()).getByRole("button", { name: "Preview changes" }));
       return screen.findByRole("button", { name: "Apply" });
     }
@@ -293,26 +291,27 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
       window.localStorage.clear();
     });
 
-    it("shows the connection from plan.source read-only and asks only for the PAT", async () => {
+    it("shows the connection from plan.source read-only and has no PAT field", async () => {
       const user = userEvent.setup();
       const fetchMock = mockFetch();
-      renderBoard(adoPlan());
+      renderBoard(adoPlan(), ADO_CREDENTIALS);
       await user.click(screen.getByRole("button", { name: "Sync from ADO" }));
       const dialog = connectDialog();
       expect(shown("Azure DevOps source")).toBe("Collaboration Hub");
       expect(shown("Project URL")).toBe("https://dev.azure.com/org/Proj");
       expect(shown("Area path")).toBe("Proj\\Team A");
       expect(within(dialog).queryAllByRole("radio")).toHaveLength(0);
-      expect(within(dialog).queryAllByRole("textbox")).toHaveLength(0);
       expect(within(dialog).queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
-      expect(within(dialog).getByLabelText("Personal Access Token")).toHaveValue("");
+      const pat = within(dialog).getByLabelText("Personal Access Token");
+      expect(pat).toHaveAttribute("readonly");
+      expect(pat).toHaveValue("\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 wxyz");
+      expect(within(dialog).getAllByRole("textbox")).toHaveLength(1);
       await openPreviewFromOpenDialog(user);
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual({ ...makeConnection(), pat: PAT });
+      expect(JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body))).toEqual(makeConnection());
     });
 
     async function openPreviewFromOpenDialog(user: ReturnType<typeof userEvent.setup>) {
-      await user.type(within(connectDialog()).getByLabelText("Personal Access Token"), PAT);
       await user.click(within(connectDialog()).getByRole("button", { name: "Preview changes" }));
       await screen.findByRole("button", { name: "Apply" });
     }
@@ -334,9 +333,8 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
       const user = userEvent.setup();
       const fetchMock = vi.fn(async () => json({ errors: ["Unknown Area path: Proj\\Team A."] }, 422));
       vi.stubGlobal("fetch", fetchMock);
-      renderBoard(adoPlan());
+      renderBoard(adoPlan(), ADO_CREDENTIALS);
       await user.click(screen.getByRole("button", { name: "Sync from ADO" }));
-      await user.type(within(connectDialog()).getByLabelText("Personal Access Token"), PAT);
       await user.click(within(connectDialog()).getByRole("button", { name: "Preview changes" }));
       expect(await within(connectDialog()).findByRole("alert")).toHaveTextContent("Unknown Area path: Proj\\Team A.");
       expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
@@ -345,7 +343,7 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     it("previews the diff; Apply updates the board as one change, closes the work-item modal and toasts with the warnings", async () => {
       const user = userEvent.setup();
       const fetchMock = mockFetch();
-      renderBoard(adoPlan());
+      renderBoard(adoPlan(), ADO_CREDENTIALS);
       // Manual saving, so the PUT can be inspected without waiting for the autosave delay.
       await user.click(screen.getByRole("switch", { name: "Autosave" }));
       await openPreview(user);
@@ -376,15 +374,12 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
       expect(toasts()).toEqual(
         expect.arrayContaining(["Board synchronized with Azure DevOps", "Neither Custom.EstimatedSize nor Custom.FeatureSize exists in this project; sizes are empty."]),
       );
-      for (let i = 0; i < window.localStorage.length; i++) {
-        expect(window.localStorage.getItem(window.localStorage.key(i) ?? "")).not.toContain(PAT);
-      }
     });
 
     it("removes the items no longer in scope when the box is ticked", async () => {
       const user = userEvent.setup();
       mockFetch();
-      renderBoard(adoPlan());
+      renderBoard(adoPlan(), ADO_CREDENTIALS);
       await openPreview(user);
       await user.click(screen.getByRole("checkbox", { name: "Remove items no longer in scope" }));
       await user.click(screen.getByRole("button", { name: "Apply" }));
@@ -394,7 +389,7 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     it("closes a work-item modal that was open when the sync is applied", async () => {
       const user = userEvent.setup();
       mockFetch();
-      renderBoard(adoPlan());
+      renderBoard(adoPlan(), ADO_CREDENTIALS);
       fireEvent.click(within(screen.getByRole("region", { name: "Board" })).getByRole("button", { name: /Reports/ }));
       expect(screen.getAllByRole("dialog")).toHaveLength(1);
       await openPreview(user);
@@ -405,7 +400,7 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     it("says the board is up to date when nothing changed", async () => {
       const user = userEvent.setup();
       mockFetch(makeBacklog());
-      renderBoard(adoPlan());
+      renderBoard(adoPlan(), ADO_CREDENTIALS);
       await openPreview(user);
       expect(screen.getByText("The board is up to date with Azure DevOps.")).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Apply" }));
@@ -415,7 +410,7 @@ describe("ReleasePlanBoardPage", { timeout: BOARD_TEST_TIMEOUT_MS }, () => {
     it("Cancel in the preview changes nothing and leaves the plan saved", async () => {
       const user = userEvent.setup();
       mockFetch();
-      renderBoard(adoPlan());
+      renderBoard(adoPlan(), ADO_CREDENTIALS);
       await openPreview(user);
       await user.click(screen.getByRole("button", { name: "Cancel" }));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

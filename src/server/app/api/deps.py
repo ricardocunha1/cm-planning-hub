@@ -3,9 +3,11 @@
 `/api/mcp`) simply do not use them."""
 
 from fastapi import Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.services.auth import SESSION_USER_KEY
+from app.db import get_session
+from app.services.auth import SESSION_USER_KEY, get_user
 
 CSRF_HEADER = "X-Requested-With"
 CSRF_VALUE = "planning-hub"
@@ -27,17 +29,25 @@ def session_user_id(request: Request) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def require_user(request: Request, settings: Settings = Depends(get_settings)) -> int | None:
+async def require_user(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    session: AsyncSession = Depends(get_session),
+) -> int | None:
     """The signed-in user's id; 401 without a valid session. Returns None only
     when `AUTH_ENABLED` is false (a server setting, never request-controlled).
 
-    The id comes from the signed cookie; the user row is not read here, so a
-    protected request costs no database round trip.
+    The id comes from the signed cookie, and the user row must still exist
+    (plans and credentials reference it): otherwise the session is cleared and
+    the answer is 401. That costs one primary-key lookup per protected request.
     """
     if not settings.auth_enabled:
         return None
     user_id = session_user_id(request)
     if user_id is None:
+        raise ApiError(401, "Authentication required.")
+    if await get_user(session, user_id) is None:
+        request.session.clear()
         raise ApiError(401, "Authentication required.")
     return user_id
 

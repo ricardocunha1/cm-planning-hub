@@ -220,6 +220,7 @@ from the Secret `cm-planning-hub-auth-secret`):
 | --- | --- |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth client credentials (required) |
 | `SESSION_SECRET` | Cookie signing key, at least 32 characters, e.g. `openssl rand -hex 32` (required) |
+| `PAT_ENCRYPTION_KEY` | Fernet key that encrypts the Azure DevOps PATs stored per user, e.g. `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` (required; changing it makes stored PATs unreadable) |
 | `PUBLIC_BASE_URL` | Public origin without trailing slash; builds the redirect URI and decides the `Secure` flag (required) |
 | `AUTH_ALLOWED_EMAIL_DOMAINS` | Optional comma-separated e-mail domains; empty = any verified Google account |
 | `SESSION_MAX_AGE_SECONDS` | Session lifetime, default 28800 (8 h) |
@@ -229,7 +230,7 @@ from the Secret `cm-planning-hub-auth-secret`):
 ## Running with Docker Compose
 
 ```bash
-cp .env.example .env             # fill in the credentials and SESSION_SECRET
+cp .env.example .env             # fill in the credentials, SESSION_SECRET and PAT_ENCRYPTION_KEY
 docker compose up --build        # http://localhost:8080
 docker compose down
 ```
@@ -268,7 +269,8 @@ Create the auth Secret as well (see **Authentication**):
 ```bash
 oc -n cm-planning-hub create secret generic cm-planning-hub-auth-secret \
   --from-literal=googleClientId=<id> --from-literal=googleClientSecret=<secret> \
-  --from-literal=sessionSecret=<sessionSecret>
+  --from-literal=sessionSecret=<sessionSecret> \
+  --from-literal=patEncryptionKey=<fernetKey>
 ```
 
 ## Running locally (development)

@@ -15,9 +15,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.api.deps import require_csrf, require_user
+import app.db as app_db
 from app.db import get_session
 from app.main import app
 from db_helpers import alembic_config, run_sql
+from fake_session import FakeSession
 from app.services.data_processing import (
     build_sprint_summary,
     parse_sprint_history,
@@ -28,15 +30,36 @@ FIXTURE_PATH = Path(__file__).resolve().parents[3] / "notebook" / "Sprint_Histor
 
 
 @pytest.fixture(autouse=True)
+def _reset_cached_engine():
+    """Drop the process-wide engine/sessionmaker of `app.db` after each test, so
+    one built by a test that bypassed the session override (no DB credentials)
+    cannot leak into the later database tests."""
+    yield
+    engine = app_db._engine
+    app_db._engine = None
+    app_db._sessionmaker = None
+    if engine is not None:
+        # close=False: connections may belong to a closed event loop.
+        engine.sync_engine.dispose(close=False)
+
+
+@pytest.fixture(autouse=True)
 def _bypass_auth():
     """The global `app` requires a session on its protected routes. Every test
-    that uses it runs as a signed-in user with no CSRF header; the auth tests
+    that uses it runs as signed-in user 1 with no CSRF header, against an empty
+    fake database (so a route that needs no stored data never connects); the auth tests
     (test_auth_*.py) build their own app with `create_app` instead."""
     app.dependency_overrides[require_user] = lambda: 1
     app.dependency_overrides[require_csrf] = lambda: None
+
+    async def no_database():
+        yield FakeSession()  # nothing saved; db tests install their own session
+
+    app.dependency_overrides[get_session] = no_database
     yield
     app.dependency_overrides.pop(require_user, None)
     app.dependency_overrides.pop(require_csrf, None)
+    app.dependency_overrides.pop(get_session, None)
 
 
 @pytest.fixture()
@@ -74,8 +97,11 @@ def migrated_db(db_url: str) -> str:
 
 @pytest.fixture()
 def clean_db(migrated_db: str) -> str:
-    """The migrated test database with `release_plans` emptied for this test."""
-    run_sql(migrated_db, "TRUNCATE release_plans RESTART IDENTITY")
+    """The migrated test database emptied for this test, holding only user 1:
+    the signed-in user `_bypass_auth` injects, which owns the boards REST tests
+    create (`release_plans.owner_id` is a foreign key to `users`)."""
+    run_sql(migrated_db, "TRUNCATE release_plans, ado_credentials, users RESTART IDENTITY CASCADE")
+    run_sql(migrated_db, "INSERT INTO users (sub, email, name) VALUES ('test-user', 'test@example.com', 'Test User')")
     return migrated_db
 
 

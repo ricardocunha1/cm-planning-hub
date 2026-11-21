@@ -40,8 +40,7 @@ in `src/client/src/lib/tools.ts`):
 │ React SPA static files       │        │ FastAPI "Planning Hub API"   │
 │ SPA fallback (try_files)     │        │ + MCP server (/api/mcp)      │
 └──────────────────────────────┘        └───────┬──────────────┬───────┘
-                                                │ SQL          │ REST (PAT from the request,
-                                                ▼              ▼ never stored; host allowlist)
+                                                │ SQL          │ REST
                                   ┌──────────────────────────┐ Azure DevOps
                                   │ database  (port 5432)    │
                                   │ PostgreSQL 17            │
@@ -52,12 +51,25 @@ in `src/client/src/lib/tools.ts`):
 - The **client** serves the SPA. In production the ingress sends `/api` straight
   to the server (the diagram omits it); with docker compose the client's nginx
   proxies `/api/` instead (`API_UPSTREAM`, default `http://server:8000`).
-- The **server** is stateless: the SPA keeps all state (validated sprint
-  summary, simulation results, Release Plan board) and sends what each
-  request needs. Every 422 response is `{errors: [str]}`.
+- The **server** keeps no session state of its own beyond the auth cookie:
+  the SPA keeps the working state (validated sprint summary, simulation
+  results, Release Plan board) and sends what each request needs. Every 422
+  response is `{errors: [str]}`.
+- **Authentication**: Google SSO (OIDC, PKCE) run by the server; a signed
+  session cookie holds only the user id; every `/api` route except
+  `/api/health`, `/api/auth/*` and `/api/mcp` needs it, and state-changing
+  requests need the `X-Requested-With` CSRF header. The SPA guards its routes
+  and shows the user in the sidebar footer. Users save Azure DevOps projects
+  and PATs in **Settings** (`/api/settings/ado-credentials`); PATs are
+  Fernet-encrypted (`PAT_ENCRYPTION_KEY`) and never returned (only the last 4
+  characters). Release Plan boards are owner-scoped (`owner_id`; unowned
+  boards are visible to all). See `specs/authentication.md` and
+  `plans/oauth-authentication.md`.
 - **Azure DevOps** is reached only through the server
-  (`/api/ado/*`). The Personal Access Token travels with each request and
-  is never persisted; `ADO_ALLOWED_HOSTS` limits which hosts may be called.
+  (`/api/ado/*`). The SPA never holds a PAT: the connect and sync modals
+  send only the project URL and the server uses the signed-in user's stored PAT
+  (a `pat` in the request, used by tests and API clients, wins);
+  `ADO_ALLOWED_HOSTS` limits which hosts may be called.
 - **MCP endpoint** (`POST /api/mcp`): the server also exposes the Release
   Plan to AI agents as an MCP server (Streamable HTTP, stateless JSON mode, so
   any replica answers). It calls `app/services` directly, has no
@@ -117,12 +129,14 @@ Python 3.12, FastAPI, pandas/NumPy, httpx.
 | Path | Purpose |
 | --- | --- |
 | `app/main.py` | App factory: mounts routers under `/api` and `/api/ado`, converts validation errors to `{errors}`. |
-| `app/config.py` | Settings from the environment (`ADO_ALLOWED_HOSTS`, `ADO_TIMEOUT_SECONDS`, `ADO_DESCRIPTION_MAX_CHARS`, `DB_*`, `MCP_ALLOWED_HOSTS`, `PUBLIC_BASE_URL`). |
+| `app/config.py` | Settings from the environment (`ADO_ALLOWED_HOSTS`, `ADO_TIMEOUT_SECONDS`, `ADO_DESCRIPTION_MAX_CHARS`, `DB_*`, `MCP_ALLOWED_HOSTS`, `PUBLIC_BASE_URL`, `GOOGLE_*`, `SESSION_SECRET`, `PAT_ENCRYPTION_KEY`, `AUTH_*`). |
 | `app/schemas.py` | Pydantic request/response models — the API contract. |
+| `app/api/auth_routes.py`, `app/api/deps.py` | Google OIDC login/callback/me/logout; `require_user` and `require_csrf` dependencies. |
 | `app/api/routes.py` | Monte Carlo: `GET /health`, `POST /validate`, `POST /simulate`. |
-| `app/api/ado_routes.py` | Azure DevOps proxy: `POST /ado/connect`, `/ado/backlog`, `/ado/sprint-history`. |
+| `app/api/ado_routes.py` | Azure DevOps proxy: `POST /ado/connect`, `/ado/backlog`, `/ado/sprint-history` (`pat` optional: falls back to the user's saved PAT). |
+| `app/api/settings_routes.py` | The user's saved ADO credentials: `/settings/ado-credentials` (list/create/update/delete; PAT encrypted, never returned). |
 | `app/mcp_server/` | MCP server mounted at `/api/mcp`: `server.py` (server, ASGI app, host/body limits), `plan_tools.py` and `ado_tools.py` (the 7 tools; create/update take only decisions: connection, PAT, milestones, `epicOrder`, `assignments`), `errors.py`, `deps.py` (test seam). |
-| `app/services/` | All business logic (routes stay thin): `validation` (form guardrails), `data_processing` (Excel parsing, sprint summary), `simulation` + `forecast` (vectorized NumPy Monte Carlo, percentiles, dates, histogram), `ado_*` (ADO client, URL rules, backlog and sprint-history reads), `ado_http` (shared ADO HTTP client for routes and MCP tools), `plan_board` (strict Release Plan board validator, used by MCP only as the last check), `plan_from_backlog` (MCP only: parses the agent's decisions and builds the full board from a fresh ADO fetch, mirroring the client's `fromBacklog.ts`), `plans` (plan storage). |
+| `app/services/` | All business logic (routes stay thin): `validation` (form guardrails), `data_processing` (Excel parsing, sprint summary), `simulation` + `forecast` (vectorized NumPy Monte Carlo, percentiles, dates, histogram), `ado_*` (ADO client, URL rules, backlog and sprint-history reads), `ado_http` (shared ADO HTTP client for routes and MCP tools), `plan_board` (strict Release Plan board validator, used by MCP only as the last check), `plan_from_backlog` (MCP only: parses the agent's decisions and builds the full board from a fresh ADO fetch, mirroring the client's `fromBacklog.ts`), `credentials` (Fernet-encrypted per-user PATs, canonical project URL), `plans` (plan storage, owner-scoped). |
 | `tests/` | pytest suite (unit, route, end-to-end incl. performance limits). |
 
 ### Client — `src/client`
@@ -137,6 +151,7 @@ shared hub pieces at the top level.
 | `src/pages/` | One component per route (`monteCarlo/` subfolder for its wizard). |
 | `src/components/` | Shared hub UI (layout, sidebar, toasts, dialogs, icons) plus per-tool folders `monteCarlo/`, `releasePlan/`, `ado/`. |
 | `src/lib/` | Non-UI logic. `tools.ts` = tool registry (add a tool here + routes in `App.tsx`). Per tool: `types.ts` + `api.ts` mirror the server schemas; `releasePlan/` holds the pure board logic (validation, reducer, layout, storage, export). |
+| `src/authStore.tsx`, `src/settingsStore.tsx`, `src/pages/LoginPage.tsx`, `src/components/settings/` | Signed-in user and route guard; saved Azure DevOps projects (Settings modal, project pickers in the connect/sync modals). |
 | `src/monteCarloStore.tsx`, `src/releasePlanStore.tsx` | Per-tool state (React context). Monte Carlo is in memory only; Release Plan autosaves to localStorage. |
 | `src/test/` | Test helpers and fixtures (`render.tsx` → `renderAt`, DnD/canvas mocks). |
 | `Dockerfile`, `nginx.conf.template` | Build → nginx-unprivileged image, `/api` proxy. |

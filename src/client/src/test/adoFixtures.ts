@@ -1,5 +1,6 @@
 // Synthetic Azure DevOps fixtures (builders). Never derived from real ADO data.
 import type { AdoBacklog, AdoConnectResponse, AdoConnection, AdoTreeNode, AdoWorkItem } from "../lib/releasePlan/adoTypes";
+import type { AdoCredential } from "../lib/settings/types";
 
 export function makeWorkItem(overrides: Partial<AdoWorkItem> & Pick<AdoWorkItem, "id">): AdoWorkItem {
   return {
@@ -107,3 +108,18 @@ export function makeConnection(overrides: Partial<AdoConnection> = {}): AdoConne
     ...overrides,
   };
 }
+
+/** Stored Settings projects the connect modals can select: "Proj" (Collaboration Hub, matches `makeConnectResponse`) and "Legacy" (On-Prem). */
+export const ADO_CREDENTIALS: AdoCredential[] = [
+  { id: 11, projectName: "Proj", projectUrl: "https://dev.azure.com/org/Proj", hasPat: true, patLast4: "wxyz" },
+  { id: 12, projectName: "Legacy", projectUrl: "https://tfs.example.com/C/P", hasPat: true, patLast4: null },
+];
+
+/** An On-Prem Settings project ("My Proj") whose stored URL is the canonical one the Release Plan integration tests use. */
+export const MY_PROJ_CREDENTIAL: AdoCredential = {
+  id: 21,
+  projectName: "My Proj",
+  projectUrl: "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/My%20Proj",
+  hasPat: true,
+  patLast4: "6789",
+};

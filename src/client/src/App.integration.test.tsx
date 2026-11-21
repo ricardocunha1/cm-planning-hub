@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import { ForecastProvider } from "./monteCarloStore";
+import { SettingsProvider } from "./settingsStore";
 import { result, validation } from "./test/monteCarloFixtures";
 import { AuthProvider } from "./authStore";
 import { TEST_USER } from "./test/authFixtures";
@@ -39,9 +40,11 @@ function renderApp(path = "/") {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );
@@ -243,7 +246,8 @@ describe("Planning Hub – full app flow", () => {
 
   it("goes home → Release Plan card → /release-plan → opens the Azure DevOps modal", async () => {
     const user = userEvent.setup();
-    fetchMock.mockResolvedValue(jsonResponse({ items: [], total: 0, page: 1, pageSize: 10 }));
+    // Answers both the saved-plans list and the Settings projects list (a fresh Response per call).
+    fetchMock.mockImplementation(async () => jsonResponse({ items: [], total: 0, page: 1, pageSize: 10 }));
     renderApp("/");
 
     // Home: both tool cards, Release Plan not active yet.
@@ -280,8 +284,8 @@ describe("Planning Hub – full app flow", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    // Only the saved-plans list is requested; no ADO traffic without a Connect.
-    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith("/api/plan"))).toBe(true);
+    // Only the saved-plans list and the Settings projects list are requested; no ADO traffic without a Connect.
+    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith("/api/plan") || String(url) === "/api/settings/ado-credentials")).toBe(true);
   }, FLOW_TIMEOUT_MS);
 
   it("switches between the tools from the sidebar", async () => {

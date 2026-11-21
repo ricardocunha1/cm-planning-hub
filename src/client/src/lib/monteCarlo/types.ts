@@ -60,7 +60,7 @@ export interface ErrorResponse {
   errors: string[];
 }
 
-/** `POST /api/ado/sprint-history` request. The PAT is never persisted. */
+/** `POST /api/ado/sprint-history` request. The SPA does not send the PAT: the server uses the signed-in user's stored one (Settings). */
 export interface AdoSprintHistoryRequest extends AdoConnectionRequest {
   /** Normalized Iteration path (`Proj\Phase 1`); matched case-insensitively, children included. */
   iterationPath: string;

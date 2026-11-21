@@ -86,13 +86,15 @@ AdoSource = Literal["onprem", "cloud"]
 
 class AdoConnectRequest(BaseModel):
     """The common `/api/ado/*` request part. The PAT is a SecretStr so it is
-    masked in reprs and never echoed back."""
+    masked in reprs and never echoed back. It is optional for the REST routes:
+    when absent the session user's stored PAT is used (`ado_client` takes the
+    resolved PAT); the MCP tools still require it."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     source: AdoSource
     project_url: str = Field(alias="projectUrl")
-    pat: SecretStr
+    pat: SecretStr | None = None
 
 
 class AdoTreeNode(BaseModel):
@@ -243,3 +245,32 @@ class PlanCreateRequest(PlanUpdateRequest):
 
     project_type: PlanProjectType = Field(alias="projectType")
     project_name: str = Field(alias="projectName")
+
+
+class AdoCredentialRequest(BaseModel):
+    """Body of `POST`/`PUT /api/settings/ado-credentials`. `pat` is required on
+    create, and on update when the canonical project URL changes; omitted or
+    blank it keeps the stored one."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    project_name: str = Field(alias="projectName")
+    project_url: str = Field(alias="projectUrl")
+    pat: SecretStr | None = None
+
+
+class AdoCredentialResponse(BaseModel):
+    """A stored credential as the API shows it: never the PAT, only `hasPat`
+    and, for PATs of 8+ characters, its last 4 characters (`patLast4`)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int
+    project_name: str = Field(alias="projectName")
+    project_url: str = Field(alias="projectUrl")
+    has_pat: bool = Field(alias="hasPat", default=True)
+    pat_last4: str | None = Field(alias="patLast4", default=None)
+
+
+class AdoCredentialListResponse(BaseModel):
+    items: list[AdoCredentialResponse]

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import { ForecastProvider } from "./monteCarloStore";
+import { SettingsProvider } from "./settingsStore";
 import { result, validation } from "./test/monteCarloFixtures";
 import { AuthProvider } from "./authStore";
 import { TEST_USER } from "./test/authFixtures";
@@ -50,9 +51,11 @@ function renderApp(path = "/monte-carlo") {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );

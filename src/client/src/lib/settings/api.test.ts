@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../monteCarlo/api";
 import { createAdoCredential, deleteAdoCredential, listAdoCredentials, updateAdoCredential } from "./api";
 
-const item = { id: 4, projectName: "Alpha", projectUrl: "https://dev.azure.com/org/Alpha", hasPat: true };
+const item = { id: 4, projectName: "Alpha", projectUrl: "https://dev.azure.com/org/Alpha", hasPat: true, patLast4: "1a2b" };
 
 function stubFetch(response: Response) {
   const fetchMock = vi.fn().mockResolvedValue(response);

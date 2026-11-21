@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listPlans } from "../lib/releasePlan/planApi";
 import { useReleasePlan } from "../releasePlanStore";
-import { makeBacklog, makeConnectResponse } from "../test/adoFixtures";
+import { ADO_CREDENTIALS, makeBacklog, makeConnectResponse } from "../test/adoFixtures";
 import { renderAt } from "../test/render";
 import { ReleasePlanHomePage } from "./ReleasePlanHomePage";
 
@@ -48,13 +48,11 @@ function mockServer(backlog = makeBacklog(), plan?: () => Response) {
   return fetchMock;
 }
 
-/** Runs the ADO modal: Collaboration Hub, URL, PAT, Connect, "Team A", then (optionally renamed) Create board. */
+/** Runs the ADO modal: Project, Connect, "Team A", then (optionally renamed) Create board. */
 async function createFromAdo(user: ReturnType<typeof userEvent.setup>, name?: string) {
   await user.click(adoCard());
   const dialog = screen.getByRole("dialog", { name: "Create from Azure DevOps" });
-  await user.click(within(dialog).getByRole("radio", { name: "Collaboration Hub" }));
-  await user.type(within(dialog).getByLabelText("Project URL"), "https://dev.azure.com/org/Proj");
-  await user.type(within(dialog).getByLabelText("Personal Access Token"), "pat-value");
+  await user.selectOptions(within(dialog).getByLabelText("Project"), "Proj");
   await user.click(within(dialog).getByRole("button", { name: "Connect" }));
   await user.click(within(await screen.findByRole("tree", { name: "Area path" })).getByRole("treeitem", { name: /^Team A/ }));
   if (name !== undefined) {
@@ -89,14 +87,14 @@ describe("ReleasePlanHomePage", () => {
   });
 
   it("renders inside the Release Plan layout with its title", async () => {
-    renderAt("/release-plan", <ReleasePlanHomePage />);
+    renderAt("/release-plan", <ReleasePlanHomePage />, { initialCredentials: ADO_CREDENTIALS });
     expect(screen.queryByRole("heading", { name: "Release Plan" })).not.toBeInTheDocument();
     expect(document.title).toBe("Planning Hub – Release Plan");
     await screen.findByRole("table");
   });
 
   it("shows the Azure DevOps card and the saved plans list, with no JSON import or Continue section", async () => {
-    renderAt("/release-plan", <ReleasePlanHomePage />);
+    renderAt("/release-plan", <ReleasePlanHomePage />, { initialCredentials: ADO_CREDENTIALS });
     expect(adoCard()).toBeEnabled();
     expect(screen.getByRole("heading", { name: "Saved release plans" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Saved one" })).toHaveAttribute("href", "/release-plan/3");
@@ -107,7 +105,7 @@ describe("ReleasePlanHomePage", () => {
 
   it("opens and closes the Azure DevOps modal from its card", async () => {
     const user = userEvent.setup();
-    renderAt("/release-plan", <ReleasePlanHomePage />);
+    renderAt("/release-plan", <ReleasePlanHomePage />, { initialCredentials: ADO_CREDENTIALS });
     await user.click(adoCard());
     expect(screen.getByRole("dialog", { name: "Create from Azure DevOps" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -119,7 +117,7 @@ describe("ReleasePlanHomePage", () => {
     const user = userEvent.setup();
     const warning = "Neither Custom.EstimatedSize nor Custom.FeatureSize exists in this project; sizes are empty.";
     const fetchMock = mockServer(makeBacklog({ warnings: [warning] }));
-    renderAt("/release-plan", <ReleasePlanHomePage />, { routes });
+    renderAt("/release-plan", <ReleasePlanHomePage />, { routes, initialCredentials: ADO_CREDENTIALS });
     await createFromAdo(user);
     expect(await screen.findByText("board: Proj – Feature Release Plan")).toBeInTheDocument();
     expect(screen.getByTestId("board-id")).toHaveTextContent("42");
@@ -135,7 +133,7 @@ describe("ReleasePlanHomePage", () => {
   it("uses the name typed in the modal", async () => {
     const user = userEvent.setup();
     mockServer();
-    renderAt("/release-plan", <ReleasePlanHomePage />, { routes });
+    renderAt("/release-plan", <ReleasePlanHomePage />, { routes, initialCredentials: ADO_CREDENTIALS });
     await createFromAdo(user, "Custom name");
     expect(await screen.findByText("board: Custom name")).toBeInTheDocument();
     expect(screen.getAllByRole("status").some((el) => el.textContent?.includes("Plan created: Custom name"))).toBe(true);
@@ -144,7 +142,7 @@ describe("ReleasePlanHomePage", () => {
   it("keeps the modal open with the inline error when saving fails", async () => {
     const user = userEvent.setup();
     mockServer(makeBacklog(), () => json({ errors: ["The release plan database is unavailable."] }, 503));
-    renderAt("/release-plan", <ReleasePlanHomePage />, { routes });
+    renderAt("/release-plan", <ReleasePlanHomePage />, { routes, initialCredentials: ADO_CREDENTIALS });
     await createFromAdo(user);
     const dialog = await screen.findByRole("dialog", { name: "Create from Azure DevOps" });
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("The release plan database is unavailable.");

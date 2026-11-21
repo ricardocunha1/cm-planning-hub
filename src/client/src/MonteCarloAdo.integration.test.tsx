@@ -7,7 +7,8 @@ import { ToastProvider } from "./components/Toast";
 import { ADO_CONNECTION_KEY as MONTE_CARLO_KEY } from "./lib/monteCarlo/constants";
 import { ADO_CONNECTION_KEY as RELEASE_PLAN_KEY } from "./lib/releasePlan/constants";
 import { ForecastProvider } from "./monteCarloStore";
-import { makeConnectResponse } from "./test/adoFixtures";
+import { SettingsProvider } from "./settingsStore";
+import { makeConnectResponse, ADO_CREDENTIALS } from "./test/adoFixtures";
 import { makeSprintHistory, result, validation } from "./test/monteCarloFixtures";
 import { AuthProvider } from "./authStore";
 import { TEST_USER } from "./test/authFixtures";
@@ -49,9 +50,11 @@ function renderApp(path = "/monte-carlo") {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider initialItems={ADO_CREDENTIALS}>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );
@@ -59,7 +62,6 @@ function renderApp(path = "/monte-carlo") {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-const PAT = "qa-sprint-history-pat-0123";
 const URL_OK = "https://dev.azure.com/org/Proj";
 const FLOW_TIMEOUT_MS = 30_000;
 const FIND = { timeout: 5_000 };
@@ -92,14 +94,11 @@ const adoCard = () => screen.getByRole("button", { name: /Load from Azure DevOps
 const adoDialog = () => screen.getByRole("dialog", { name: "Load from Azure DevOps" });
 const adoSourceCard = () => screen.getByRole("region", { name: "Data source: Azure DevOps" });
 
-/** /monte-carlo → ADO card → connection → Connect → pick `pathName` → Load sprint history. */
+/** /monte-carlo → ADO card → project → Connect → pick `pathName` → Load sprint history. */
 async function loadFromAdo(user: ReturnType<typeof userEvent.setup>, pathName = /^Phase 1/) {
   await user.click(adoCard());
   const dialog = adoDialog();
-  await user.click(within(dialog).getByRole("radio", { name: "Collaboration Hub" }));
-  await user.clear(within(dialog).getByLabelText("Project URL"));
-  await user.type(within(dialog).getByLabelText("Project URL"), URL_OK);
-  await user.type(within(dialog).getByLabelText("Personal Access Token"), PAT);
+  await user.selectOptions(within(dialog).getByLabelText("Project"), "Proj");
   await user.click(within(dialog).getByRole("button", { name: "Connect" }));
   const tree = await within(dialog).findByRole("tree", { name: "Iteration path" }, FIND);
   await user.click(within(tree).getByRole("treeitem", { name: pathName }));
@@ -115,17 +114,12 @@ async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>, { skip = 
   fireEvent.submit(screen.getByRole("button", { name: "Continue" }).closest("form")!);
 }
 
+/** The modals never hold a PAT: no request body mentions one. */
 function assertNoPatAnywhere(fetchMock: ReturnType<typeof mockFetch>) {
-  for (let i = 0; i < window.localStorage.length; i++) {
-    expect(window.localStorage.getItem(window.localStorage.key(i) ?? "")).not.toContain(PAT);
-  }
-  for (const [url, init] of fetchMock.mock.calls) {
-    if (String(url) === "/api/ado/connect" || String(url) === "/api/ado/sprint-history") {
-      continue;
-    }
+  for (const [, init] of fetchMock.mock.calls) {
     const body = (init as RequestInit | undefined)?.body;
     const text = body instanceof FormData ? JSON.stringify([...body.entries()].map(([k, v]) => [k, String(v)])) : String(body ?? "");
-    expect(text).not.toContain(PAT);
+    expect(text).not.toContain('"pat"');
   }
 }
 
@@ -155,9 +149,9 @@ describe("Monte Carlo – Load from Azure DevOps (full app)", () => {
     await waitFor(() => expect(location()).toBe("/monte-carlo/input"), FIND);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    // The sprint-history request: connection + picked path, PAT in the JSON body only.
+    // The sprint-history request: connection + picked path, no PAT.
     const [historyInit] = callsTo(fetchMock, "/api/ado/sprint-history");
-    expect(JSON.parse(String(historyInit.body))).toEqual({ source: "cloud", projectUrl: URL_OK, pat: PAT, iterationPath: "Proj\\Phase 1" });
+    expect(JSON.parse(String(historyInit.body))).toEqual({ source: "cloud", projectUrl: URL_OK, iterationPath: "Proj\\Phase 1" });
 
     // Warnings become info toasts; the source card summarizes the load.
     expect(screen.getAllByRole("status").map((s) => s.textContent)).toContain(WARNING);
@@ -284,12 +278,12 @@ describe("Monte Carlo – Load from Azure DevOps (full app)", () => {
     expect(form.has("sprint_history_items")).toBe(false);
   }, FLOW_TIMEOUT_MS);
 
-  it("re-opening the modal pre-fills Monte Carlo's remembered connection (never the PAT); Release Plan's modal is not affected", async () => {
+  it("re-opening the modal pre-selects Monte Carlo's remembered project; Release Plan's modal is not affected", async () => {
     mockFetch({
       "/api/ado/connect": [() => json(makeConnectResponse())],
       "/api/ado/sprint-history": [() => json(makeSprintHistory())],
     });
-    window.localStorage.setItem(RELEASE_PLAN_KEY, JSON.stringify({ source: "onprem", projectUrl: "https://tfs.example.com/Coll/Other" }));
+    window.localStorage.setItem(RELEASE_PLAN_KEY, JSON.stringify({ source: "onprem", projectUrl: "https://tfs.example.com/C/P" }));
     const user = userEvent.setup();
     renderApp();
 
@@ -298,18 +292,15 @@ describe("Monte Carlo – Load from Azure DevOps (full app)", () => {
     await user.click(screen.getByRole("link", { name: "Change data source" }));
 
     await user.click(adoCard());
-    expect(within(adoDialog()).getByRole("radio", { name: "Collaboration Hub" })).toBeChecked();
-    expect(within(adoDialog()).getByLabelText("Project URL")).toHaveValue(URL_OK);
-    expect(within(adoDialog()).getByLabelText("Personal Access Token")).toHaveValue("");
+    expect(within(adoDialog()).getByLabelText("Project")).toHaveValue("11");
     await user.keyboard("{Escape}");
 
     // Release Plan keeps its own remembered connection.
     await user.click(within(screen.getByRole("navigation", { name: "Hub navigation" })).getByRole("link", { name: "Release Plan" }));
     await user.click(screen.getByRole("button", { name: /Create from Azure DevOps/ }));
     const rp = screen.getByRole("dialog", { name: "Create from Azure DevOps" });
-    expect(within(rp).getByRole("radio", { name: "On-Prem" })).toBeChecked();
-    expect(within(rp).getByLabelText("Project URL")).toHaveValue("https://tfs.example.com/Coll/Other");
-    expect(JSON.parse(window.localStorage.getItem(RELEASE_PLAN_KEY) ?? "null")).toEqual({ source: "onprem", projectUrl: "https://tfs.example.com/Coll/Other" });
+    expect(within(rp).getByLabelText("Project")).toHaveValue("12");
+    expect(JSON.parse(window.localStorage.getItem(RELEASE_PLAN_KEY) ?? "null")).toEqual({ source: "onprem", projectUrl: "https://tfs.example.com/C/P" });
   }, FLOW_TIMEOUT_MS);
 
   it("closing the modal while the sprint history loads aborts the request and changes nothing", async () => {

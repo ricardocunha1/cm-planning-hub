@@ -4,7 +4,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AUTOSAVE_KEY } from "../lib/releasePlan/autosavePreference";
-import { makeBacklog, makeConnectResponse } from "../test/adoFixtures";
+import { makeBacklog, makeConnectResponse, MY_PROJ_CREDENTIAL } from "../test/adoFixtures";
 import { samplePlan } from "../test/releasePlanFixtures";
 import { StrictMode } from "react";
 import { render } from "@testing-library/react";
@@ -12,6 +12,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { appRoutes } from "../App";
 import { ToastProvider } from "../components/Toast";
 import { ForecastProvider } from "../monteCarloStore";
+import { SettingsProvider } from "../settingsStore";
 import { ProbeLayout } from "../test/render";
 import { renderApp } from "../test/renderApp";
 import { AuthProvider } from "../authStore";
@@ -111,10 +112,7 @@ async function rename(user: ReturnType<typeof userEvent.setup>, name: string) {
 async function createFromAdo(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(await screen.findByRole("button", { name: /Create from Azure DevOps/ }, FIND));
   const dialog = screen.getByRole("dialog", { name: "Create from Azure DevOps" });
-  await user.click(within(dialog).getByRole("radio", { name: "On-Prem" }));
-  await user.clear(within(dialog).getByLabelText("Project URL"));
-  await user.type(within(dialog).getByLabelText("Project URL"), CANONICAL);
-  await user.type(within(dialog).getByLabelText("Personal Access Token"), "qa-pat-0123456789");
+  await user.selectOptions(within(dialog).getByLabelText("Project"), "My Proj");
   await user.click(within(dialog).getByRole("button", { name: "Connect" }));
   await screen.findByRole("tree", { name: "Area path" }, FIND);
   await user.click(within(dialog).getByRole("radio", { name: "Iteration path" }));
@@ -141,7 +139,7 @@ describe("Release Plan – board persistence (integration)", { timeout: TIMEOUT 
   it("create -> board -> change -> autosave PUT after 3 s -> reopen from the list shows the saved state", async () => {
     const user = userEvent.setup();
     const { puts, calls } = fakeServer();
-    renderApp("/release-plan");
+    renderApp("/release-plan", { initialCredentials: [MY_PROJ_CREDENTIAL] });
     await createFromAdo(user, "Q4 roadmap");
     await waitFor(() => expect(location()).toBe("/release-plan/100"), FIND);
     expect(status()).toHaveTextContent("Saved");
@@ -422,9 +420,11 @@ describe("Release Plan – board persistence (integration)", { timeout: TIMEOUT 
       <StrictMode>
         <ToastProvider>
           <AuthProvider initialUser={TEST_USER}>
-            <ForecastProvider>
-              <RouterProvider router={router} />
-            </ForecastProvider>
+            <SettingsProvider initialItems={[MY_PROJ_CREDENTIAL]}>
+              <ForecastProvider>
+                <RouterProvider router={router} />
+              </ForecastProvider>
+            </SettingsProvider>
           </AuthProvider>
         </ToastProvider>
       </StrictMode>,

@@ -135,7 +135,6 @@ def test_connect_all_fields_missing_reports_every_message(ado_client, fake):
     assert _errors(ado_client.post("/api/ado/connect", json={})) == [
         "Choose the Azure DevOps source (On-Prem or Collaboration Hub).",
         "Enter the Azure DevOps project URL.",
-        "Enter a Personal Access Token.",
     ]
     assert fake.requests == []
 
@@ -147,7 +146,7 @@ def test_connect_all_fields_missing_reports_every_message(ado_client, fake):
         ({"source": "azure"}, "Choose the Azure DevOps source (On-Prem or Collaboration Hub)."),
         ({"projectUrl": "   "}, "Enter the Azure DevOps project URL."),
         ({"projectUrl": None}, "Enter the Azure DevOps project URL."),
-        ({"pat": ""}, "Enter a Personal Access Token."),
+        ({"pat": ""}, "A Personal Access Token is required: enter one, or save one for this project in Settings."),
         ({"pat": 123}, "Enter a Personal Access Token."),
     ],
 )
@@ -159,7 +158,7 @@ def test_connect_blank_field_messages(ado_client, fake, overrides, message):
 @pytest.mark.parametrize("content", [b"not json", b"[1, 2]", b"", b'"text"'])
 def test_connect_unreadable_body_reports_field_messages(ado_client, content):
     response = ado_client.post("/api/ado/connect", content=content, headers={"Content-Type": "application/json"})
-    assert len(_errors(response)) == 3
+    assert len(_errors(response)) == 2
 
 
 # --- 422: URL rules ----------------------------------------------------------------

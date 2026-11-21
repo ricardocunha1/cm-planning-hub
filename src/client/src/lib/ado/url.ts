@@ -7,6 +7,7 @@ import type { AdoSource } from "./types";
  */
 
 export const SOURCE_REQUIRED = "Choose the Azure DevOps source (On-Prem or Collaboration Hub).";
+export const PROJECT_REQUIRED = "Select an Azure DevOps project.";
 export const URL_REQUIRED = "Enter the Azure DevOps project URL.";
 export const PAT_REQUIRED = "Enter a Personal Access Token.";
 export const HTTPS_REQUIRED = "The URL must start with https://.";
@@ -24,6 +25,33 @@ export const SOURCE_LABELS: Readonly<Record<AdoSource, string>> = {
   onprem: "On-Prem",
   cloud: "Collaboration Hub",
 };
+
+/**
+ * The Azure DevOps source a stored project URL belongs to, by the server's rule
+ * (`parse_project_url`): "cloud" only for host `dev.azure.com` or
+ * `<org>.visualstudio.com` (exactly one label before `visualstudio.com`);
+ * anything else (or an unparsable URL) is "onprem".
+ */
+export function sourceOf(url: string): AdoSource {
+  const stripped = pyStrip(url);
+  if (!stripped.toLowerCase().startsWith("https://") || LONE_SURROGATE.test(stripped)) {
+    return "onprem";
+  }
+  const rest = stripped.replace(/[\t\r\n]/g, "").slice("https://".length);
+  const netlocEnd = rest.search(/[/?#]/);
+  const parsed = splitNetloc(netlocEnd < 0 ? rest : rest.slice(0, netlocEnd));
+  if (parsed === null) {
+    return "onprem";
+  }
+  const { host } = parsed;
+  return host === CLOUD_HOST || (host.endsWith(VISUALSTUDIO_SUFFIX) && host.split(".").length === 3) ? "cloud" : "onprem";
+}
+
+/** Whether two project URLs are the same project: compared case-insensitively, ignoring surrounding whitespace and trailing slashes. */
+export function sameProjectUrl(a: string, b: string): boolean {
+  const normalize = (url: string) => url.trim().replace(/\/+$/, "").toLowerCase();
+  return normalize(a) === normalize(b);
+}
 
 const CLOUD_HOST = "dev.azure.com";
 const VISUALSTUDIO_SUFFIX = ".visualstudio.com";

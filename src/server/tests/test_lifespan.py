@@ -2,6 +2,7 @@
 started with `with TestClient(app)`, which (unlike the plain `TestClient(app)`
 used elsewhere) runs the lifespan."""
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
@@ -72,7 +73,7 @@ def test_mcp_without_lifespan_answers_503():
 def test_lifespan_refuses_to_start_when_auth_secrets_are_missing(env):
     env.setenv("DB_MIGRATE_ON_STARTUP", "false")
     env.setenv("AUTH_ENABLED", "true")
-    for name in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SESSION_SECRET", "PUBLIC_BASE_URL"):
+    for name in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SESSION_SECRET", "PAT_ENCRYPTION_KEY", "PUBLIC_BASE_URL"):
         env.delenv(name, raising=False)
     with pytest.raises(RuntimeError, match="GOOGLE_CLIENT_ID is required"):
         with TestClient(app):
@@ -85,6 +86,7 @@ def test_lifespan_starts_with_auth_fully_configured(env):
     env.setenv("GOOGLE_CLIENT_ID", "id")
     env.setenv("GOOGLE_CLIENT_SECRET", "secret")
     env.setenv("SESSION_SECRET", "s" * 32)
+    env.setenv("PAT_ENCRYPTION_KEY", Fernet.generate_key().decode())
     env.setenv("PUBLIC_BASE_URL", "http://localhost:8080")
     with TestClient(app) as client:
         assert client.get("/api/health").status_code == 200
@@ -96,8 +98,22 @@ def test_mcp_stays_open_when_auth_is_enabled(env):
     env.setenv("GOOGLE_CLIENT_ID", "id")
     env.setenv("GOOGLE_CLIENT_SECRET", "secret")
     env.setenv("SESSION_SECRET", "s" * 32)
+    env.setenv("PAT_ENCRYPTION_KEY", Fernet.generate_key().decode())
     env.setenv("PUBLIC_BASE_URL", "http://localhost:8080")
     with TestClient(app, base_url="http://localhost") as client:
         response = client.post("/api/mcp", json=MCP_INITIALIZE, headers=MCP_HEADERS, follow_redirects=False)
     assert response.status_code == 200
     assert "set-cookie" not in response.headers
+
+
+def test_lifespan_refuses_to_start_with_an_invalid_pat_encryption_key(env):
+    env.setenv("DB_MIGRATE_ON_STARTUP", "false")
+    env.setenv("AUTH_ENABLED", "true")
+    env.setenv("GOOGLE_CLIENT_ID", "id")
+    env.setenv("GOOGLE_CLIENT_SECRET", "secret")
+    env.setenv("SESSION_SECRET", "s" * 32)
+    env.setenv("PUBLIC_BASE_URL", "http://localhost:8080")
+    env.setenv("PAT_ENCRYPTION_KEY", "not-a-fernet-key")
+    with pytest.raises(RuntimeError, match="PAT_ENCRYPTION_KEY must be a valid Fernet key"):
+        with TestClient(app):
+            pass

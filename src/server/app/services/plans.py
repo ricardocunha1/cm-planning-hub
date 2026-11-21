@@ -3,8 +3,9 @@ from collections.abc import Mapping
 from datetime import timezone
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import ReleasePlanRow
 from app.schemas import PlanDetail, PlanSummary
@@ -32,6 +33,15 @@ NUL = "\x00"
 
 def _valid_id(plan_id: int) -> bool:
     return 1 <= plan_id <= MAX_PLAN_ID
+
+
+def _visible(owner_id: int | None) -> list[ColumnElement[bool]]:
+    """The row filters of the plans a user may see: their own and the unowned
+    ones (`owner_id IS NULL`: boards that predate users or came through MCP).
+    `owner_id=None` means no user (MCP, or `AUTH_ENABLED` false): no filter."""
+    if owner_id is None:
+        return []
+    return [or_(ReleasePlanRow.owner_id == owner_id, ReleasePlanRow.owner_id.is_(None))]
 
 
 def _trimmed(value: Any) -> str:
@@ -110,11 +120,16 @@ def _detail(row: ReleasePlanRow) -> PlanDetail:
     return PlanDetail(**_summary(row).model_dump(by_alias=True), state=row.state)
 
 
-async def list_plans(session: AsyncSession, page: int) -> tuple[list[PlanSummary], int]:
-    """One page of plans (most recently updated first) and the total count."""
-    total = await session.scalar(select(func.count()).select_from(ReleasePlanRow)) or 0
+async def list_plans(
+    session: AsyncSession, page: int, owner_id: int | None = None
+) -> tuple[list[PlanSummary], int]:
+    """One page of the plans visible to `owner_id` (most recently updated
+    first) and their total count. Every plan when `owner_id` is None."""
+    visible = _visible(owner_id)
+    total = await session.scalar(select(func.count()).select_from(ReleasePlanRow).where(*visible)) or 0
     result = await session.execute(
         select(ReleasePlanRow)
+        .where(*visible)
         .order_by(ReleasePlanRow.updated_at.desc(), ReleasePlanRow.id.desc())
         .limit(PLAN_PAGE_SIZE)
         .offset((page - 1) * PLAN_PAGE_SIZE)
@@ -122,19 +137,37 @@ async def list_plans(session: AsyncSession, page: int) -> tuple[list[PlanSummary
     return [_summary(row) for row in result.scalars()], total
 
 
-async def get_plan(session: AsyncSession, plan_id: int) -> PlanDetail | None:
+async def _visible_row(session: AsyncSession, plan_id: int, owner_id: int | None) -> ReleasePlanRow | None:
+    """The plan row when it exists and is visible to `owner_id`, else None
+    (unknown and not-visible are indistinguishable to the caller)."""
     if not _valid_id(plan_id):
         return None
-    row = await session.get(ReleasePlanRow, plan_id)
+    result = await session.execute(select(ReleasePlanRow).where(ReleasePlanRow.id == plan_id, *_visible(owner_id)))
+    return result.scalar_one_or_none()
+
+
+async def get_plan(session: AsyncSession, plan_id: int, owner_id: int | None = None) -> PlanDetail | None:
+    """The plan, or None when the id is unknown or not visible to `owner_id`."""
+    row = await _visible_row(session, plan_id, owner_id)
     return _detail(row) if row else None
 
 
 async def create_plan(
-    session: AsyncSession, name: str, project_type: str, project_name: str, state: dict[str, Any]
+    session: AsyncSession,
+    name: str,
+    project_type: str,
+    project_name: str,
+    state: dict[str, Any],
+    owner_id: int | None = None,
 ) -> PlanDetail:
-    """Insert a plan (name and project name stored trimmed) and commit."""
+    """Insert a plan (name and project name stored trimmed) owned by
+    `owner_id` (None = unowned) and commit."""
     row = ReleasePlanRow(
-        name=name.strip(), project_type=project_type, project_name=project_name.strip(), state=state
+        name=name.strip(),
+        project_type=project_type,
+        project_name=project_name.strip(),
+        state=state,
+        owner_id=owner_id,
     )
     session.add(row)
     await session.commit()
@@ -143,13 +176,12 @@ async def create_plan(
 
 
 async def update_plan(
-    session: AsyncSession, plan_id: int, name: str, state: dict[str, Any]
+    session: AsyncSession, plan_id: int, name: str, state: dict[str, Any], owner_id: int | None = None
 ) -> PlanDetail | None:
-    """Replace name and board and set `updated_at = now()`; the project type
-    and name never change. Last write wins. None when the id is unknown."""
-    if not _valid_id(plan_id):
-        return None
-    row = await session.get(ReleasePlanRow, plan_id)
+    """Replace name and board and set `updated_at = now()`; the project type,
+    name and owner never change. Last write wins. None when the id is unknown
+    or not visible to `owner_id`."""
+    row = await _visible_row(session, plan_id, owner_id)
     if row is None:
         return None
     row.name = name.strip()
@@ -160,10 +192,12 @@ async def update_plan(
     return _detail(row)
 
 
-async def delete_plan(session: AsyncSession, plan_id: int) -> bool:
-    """Delete a plan; False when the id is unknown."""
+async def delete_plan(session: AsyncSession, plan_id: int, owner_id: int | None = None) -> bool:
+    """Delete a plan; False when the id is unknown or not visible to `owner_id`."""
     if not _valid_id(plan_id):
         return False
-    result = await session.execute(delete(ReleasePlanRow).where(ReleasePlanRow.id == plan_id))
+    result = await session.execute(
+        delete(ReleasePlanRow).where(ReleasePlanRow.id == plan_id, *_visible(owner_id))
+    )
     await session.commit()
     return result.rowcount > 0

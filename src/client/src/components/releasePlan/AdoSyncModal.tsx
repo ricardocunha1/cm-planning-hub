@@ -1,14 +1,15 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { PAT_REQUIRED, SOURCE_LABELS } from "../../lib/ado/url";
+import { SOURCE_LABELS, sameProjectUrl } from "../../lib/ado/url";
 import { adoBacklog } from "../../lib/releasePlan/adoApi";
 import type { AdoBacklog, AdoConnection, AdoScopeType } from "../../lib/releasePlan/adoTypes";
 import { planConnection } from "../../lib/releasePlan/selectors";
 import type { PlanSource } from "../../lib/releasePlan/types";
+import { useSettings } from "../../settingsStore";
 import { errorMessages } from "../Toast";
 import { useDialog } from "../useDialog";
 
 interface AdoSyncModalProps {
-  /** Whether the modal is shown; it starts fresh (no PAT, no error) every time it opens. */
+  /** Whether the modal is shown; it starts fresh (no error) every time it opens. */
   open: boolean;
   /** The board's `plan.source`; its connection is read when the modal opens. */
   source: PlanSource;
@@ -23,8 +24,6 @@ const SCOPE_LABELS: Readonly<Record<AdoScopeType, string>> = {
   iteration: "Iteration path",
 };
 
-const inputClass =
-  "block w-full rounded border border-line-bold bg-canvas px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
 const primaryButton =
   "rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-surface";
 const secondaryButton =
@@ -33,11 +32,17 @@ const secondaryButton =
 /**
  * Sync dialog of the Release Plan board ("Sync from Azure DevOps"). The
  * connection (source, project URL, Area/Iteration path) comes from
- * `plan.source` and is shown read-only; only the Personal Access Token is typed
- * in, and it lives only in this component's state. "Preview changes" posts
- * `/api/ado/backlog` and hands the result to `onBacklog`; a blank PAT or a
- * server error shows inline and the modal stays open. A board that isn't
- * linked to an Azure DevOps project gets an explanation and a Close button only.
+ * `plan.source` and is shown read-only. There is no PAT field: the request to
+ * `/api/ado/backlog` omits it and the server uses the signed-in user's PAT
+ * stored for the plan's project URL. The Settings projects are loaded with the
+ * settings store (loading and retry states); the one whose URL matches the
+ * plan's (case-insensitive, trailing slash ignored) is shown (redacted, read-only) as the
+ * credential in use and enables "Preview changes". Without a match the dialog says so and
+ * offers "Open settings" while Preview stays disabled. "Preview changes" hands
+ * the backlog to `onBacklog`; a server error (e.g. a missing or expired PAT)
+ * shows inline with a hint to edit the project in Settings and the modal stays
+ * open. A board that isn't linked to an Azure DevOps project gets an
+ * explanation and a Close button only.
  */
 export function AdoSyncModal({ open, ...props }: AdoSyncModalProps) {
   return open ? <AdoSyncDialog {...props} /> : null;
@@ -86,38 +91,41 @@ function AdoSyncDialog({ source, onClose, onBacklog }: Omit<AdoSyncModalProps, "
   );
 }
 
-/** The read-only connection, the PAT input and the Cancel / Preview changes buttons. */
+/** Dots plus the last 4 characters of the saved PAT (only the dots when unknown); never the PAT itself. */
+function redactedPat(last4: string | null): string {
+  return last4 ? `\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 ${last4}` : "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+}
+
+/** The read-only connection, the saved-credential status and the Cancel / Preview changes buttons. */
 function SyncForm({ connection, onClose, onBacklog }: { connection: AdoConnection } & Pick<AdoSyncModalProps, "onClose" | "onBacklog">) {
-  const patId = useId();
-  const patHelpId = useId();
   const errorId = useId();
+  const patId = useId();
   const abortRef = useRef<AbortController | null>(null);
-  const [pat, setPat] = useState("");
+  const { items, status, ensureLoaded, load: reloadProjects, openSettings } = useSettings();
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const [patInvalid, setPatInvalid] = useState(false);
+
+  useEffect(() => {
+    void ensureLoaded();
+  }, [ensureLoaded]);
 
   // Abort whatever is in flight when the modal closes (unmounts).
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  const credential = items.find((item) => sameProjectUrl(item.projectUrl, connection.projectUrl)) ?? null;
+
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy) {
-      return;
-    }
-    if (!pat.trim()) {
-      setErrors([PAT_REQUIRED]);
-      setPatInvalid(true);
+    if (busy || !credential) {
       return;
     }
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     setErrors([]);
-    setPatInvalid(false);
     setBusy(true);
     try {
-      const backlog = await adoBacklog({ ...connection, pat }, controller.signal);
+      const backlog = await adoBacklog(connection, controller.signal);
       if (controller.signal.aborted) {
         return;
       }
@@ -131,8 +139,6 @@ function SyncForm({ connection, onClose, onBacklog }: { connection: AdoConnectio
     }
   };
 
-  const describedBy = [patHelpId, patInvalid ? errorId : undefined].filter(Boolean).join(" ");
-
   return (
     <form onSubmit={(event) => void onSubmit(event)} noValidate className="flex min-h-0 flex-col">
       <div className="space-y-4 overflow-y-auto px-6 py-5 text-sm">
@@ -144,31 +150,42 @@ function SyncForm({ connection, onClose, onBacklog }: { connection: AdoConnectio
           <dt className="font-medium text-fg-soft">{SCOPE_LABELS[connection.scopeType]}</dt>
           <dd className="break-all text-fg-muted">{connection.scopePath}</dd>
         </dl>
-        <div className="space-y-1">
-          <label htmlFor={patId} className="block font-medium text-fg-soft">
-            Personal Access Token
-          </label>
-          <input
-            id={patId}
-            type="password"
-            autoComplete="off"
-            data-1p-ignore="true"
-            data-lpignore="true"
-            data-form-type="other"
-            value={pat}
-            onChange={(event) => {
-              setPat(event.target.value);
-              setErrors([]);
-              setPatInvalid(false);
-            }}
-            aria-invalid={patInvalid ? true : undefined}
-            aria-describedby={describedBy}
-            className={inputClass}
-          />
-          <p id={patHelpId} className="text-xs text-fg-subtle">
-            Needs the Work Items (Read) scope. It is sent only to connect and is never stored.
+        {status === "idle" || status === "loading" ? (
+          <p role="status" className="text-fg-muted">
+            Loading your projects…
           </p>
-        </div>
+        ) : status === "error" ? (
+          <div className="flex items-center gap-3 text-danger">
+            <p>Could not load your projects.</p>
+            <button type="button" onClick={() => void reloadProjects()} className={secondaryButton}>
+              Retry
+            </button>
+          </div>
+        ) : credential ? (
+          <div className="space-y-1">
+            <label htmlFor={patId} className="block font-medium text-fg-soft">
+              Personal Access Token
+            </label>
+            <input
+              id={patId}
+              type="text"
+              readOnly
+              autoComplete="off"
+              value={redactedPat(credential.patLast4)}
+              className="w-full rounded border border-line-bold bg-surface-raised px-3 py-2 text-fg-muted focus:outline-none"
+            />
+            <p className="text-xs text-fg-subtle">
+              Saved in Settings as <span className="font-medium text-fg-soft">{credential.projectName}</span>
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-fg-muted">No saved Personal Access Token for this project.</p>
+            <button type="button" onClick={openSettings} className={secondaryButton}>
+              Open settings
+            </button>
+          </div>
+        )}
         {errors.length > 0 && (
           <div id={errorId} role="alert" className="space-y-1 text-danger">
             {errors.map((message) => (
@@ -176,12 +193,21 @@ function SyncForm({ connection, onClose, onBacklog }: { connection: AdoConnectio
             ))}
           </div>
         )}
+        {errors.length > 0 && (
+          <p className="text-xs text-fg-subtle">
+            If the Personal Access Token is missing or expired, edit the project in{" "}
+            <button type="button" onClick={openSettings} className="underline hover:text-fg-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]">
+              Settings
+            </button>
+            .
+          </p>
+        )}
       </div>
       <div className="flex justify-end gap-3 px-6 py-4 border-t border-line">
         <button type="button" onClick={onClose} className={secondaryButton}>
           Cancel
         </button>
-        <button type="submit" disabled={busy} className={primaryButton} style={{ backgroundColor: "var(--cm-light-blue)" }}>
+        <button type="submit" disabled={busy || status !== "ready" || !credential} className={primaryButton} style={{ backgroundColor: "var(--cm-light-blue)" }}>
           {busy ? "Loading work items…" : "Preview changes"}
         </button>
       </div>

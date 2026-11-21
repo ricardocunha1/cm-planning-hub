@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from urllib.parse import urlsplit
 
+from cryptography.fernet import Fernet
 from sqlalchemy.engine import URL
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,8 @@ class Settings:
     a signed session cookie. The client id/secret, the session secret and the
     PAT encryption key are kept out of `repr`. `auth_enabled=False` turns the
     session requirement off (dev/test only; it is read from the environment,
-    never from a request). `auth_allowed_email_domains` empty means any
+    never from a request). `pat_encryption_key` is the Fernet key of the stored
+    Azure DevOps PATs (required when auth is enabled). `auth_allowed_email_domains` empty means any
     verified Google account may sign in.
     """
 
@@ -114,11 +116,14 @@ class Settings:
             "GOOGLE_CLIENT_ID": self.google_client_id,
             "GOOGLE_CLIENT_SECRET": self.google_client_secret,
             "SESSION_SECRET": self.session_secret,
+            "PAT_ENCRYPTION_KEY": self.pat_encryption_key,
             "PUBLIC_BASE_URL": self.public_base_url,
         }
         errors = [f"{name} is required when AUTH_ENABLED is true." for name, value in required.items() if not value]
         if self.session_secret and len(self.session_secret) < MIN_SESSION_SECRET_LENGTH:
             errors.append(f"SESSION_SECRET must be at least {MIN_SESSION_SECRET_LENGTH} characters.")
+        if self.pat_encryption_key and not is_valid_fernet_key(self.pat_encryption_key):
+            errors.append("PAT_ENCRYPTION_KEY must be a valid Fernet key (32 url-safe base64-encoded bytes).")
         if self.public_base_url and not _is_absolute_http_url(self.public_base_url):
             errors.append("PUBLIC_BASE_URL must be an absolute http(s) URL without a trailing slash.")
         return errors
@@ -155,6 +160,15 @@ def parse_mcp_allowed_hosts(raw: str | None) -> tuple[str, ...]:
     (a value with no entries means the default list)."""
     entries = tuple(entry.strip().lower() for entry in (raw or "").split(",") if entry.strip())
     return entries or tuple(DEFAULT_MCP_ALLOWED_HOSTS.split(","))
+
+
+def is_valid_fernet_key(key: str) -> bool:
+    """Whether `key` is a usable Fernet key (the stored PATs' encryption key)."""
+    try:
+        Fernet(key.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
+    return True
 
 
 def _is_absolute_http_url(value: str) -> bool:

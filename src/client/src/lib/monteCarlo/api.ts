@@ -147,7 +147,7 @@ export function simulate(
 
 /**
  * POST /api/ado/sprint-history: the resolved User Stories and Bugs under the
- * chosen Iteration path (children included). The PAT travels in the JSON body only.
+ * chosen Iteration path (children included). `pat` is optional (the stored one is used when omitted) and travels in the JSON body only.
  * @throws ApiError with the server's messages (422 `{errors}`); an `AbortError` when `signal` aborts.
  */
 export function adoSprintHistory(req: AdoSprintHistoryRequest, signal?: AbortSignal): Promise<AdoSprintHistory> {

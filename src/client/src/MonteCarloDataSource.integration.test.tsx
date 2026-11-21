@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import { ForecastProvider } from "./monteCarloStore";
+import { SettingsProvider } from "./settingsStore";
 import { result, validation } from "./test/monteCarloFixtures";
 import { AuthProvider } from "./authStore";
 import { TEST_USER } from "./test/authFixtures";
@@ -40,9 +41,11 @@ function renderApp(path = "/") {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );
@@ -108,7 +111,7 @@ describe("Monte Carlo – data source selection (full app)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   }, FLOW_TIMEOUT_MS);
 
-  it("makes the Azure DevOps card reachable by Tab; Enter opens its modal, Cancel closes it, no API calls", async () => {
+  it("makes the Azure DevOps card reachable by Tab; Enter opens its modal, Cancel closes it, no Azure DevOps calls", async () => {
     const user = userEvent.setup();
     renderApp("/monte-carlo");
 
@@ -135,7 +138,8 @@ describe("Monte Carlo – data source selection (full app)", () => {
 
     expect(location()).toBe("/monte-carlo");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    // Opening the modal only loads the user's Settings projects; no Azure DevOps call is made.
+    expect(fetchMock.mock.calls.every(([url]) => String(url) === "/api/settings/ado-credentials")).toBe(true);
   }, FLOW_TIMEOUT_MS);
 
   it("opens the Excel modal from the keyboard (Tab to the card, Enter) and continues to the form", async () => {

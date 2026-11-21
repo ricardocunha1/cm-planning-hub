@@ -113,14 +113,14 @@ Done 2026-11-21: frontend-developer, then qa-engineer (PASS, no Blocker/Major; m
 - A 401 on the settings list also shows a "Could not load settings" toast while redirecting to `/login` (cosmetic).
 
 ## Phase 3: Backend storage of PATs and plan ownership
-Status: Not started
+Status: Complete
 
-- [ ] Migration `0003`: `ado_credentials` (`id`, `user_id` FK cascade, `project_name`, `project_url`, `pat_encrypted`, `created_at`, `updated_at`, unique `(user_id, project_url)`) and nullable indexed `release_plans.owner_id` FK to `users`; update `app/models.py`.
-- [ ] `app/services/credentials.py`: Fernet encrypt/decrypt, CRUD scoped to the user, lookup by normalized project URL.
-- [ ] `app/schemas.py` models and `app/api/settings_routes.py` implementing the contract (responses never contain the PAT); reuse `parse_project_url` for URL/host validation; mount in `main.py` behind `require_user`.
-- [ ] `app/services/plans.py`: every function takes the owner; visible = `owner_id == user OR owner_id IS NULL`; create sets the owner; update/delete enforce visibility (404 otherwise). MCP tools keep working through the unowned (`NULL`) path.
-- [ ] `app/api/ado_routes.py`, `app/schemas.py`, `app/services/ado_http.py::ado_client`, and the `connection_field_errors` check in `ado_url.py`: make `pat` optional and fall back to the stored PAT for the session user; update the MCP `ado_fetch_backlog` wording only if behaviour changes (it should not).
-- [ ] Unit tests: encryption round trip, ciphertext differs from plaintext, PAT absent from responses and logs, ownership 404s, duplicate URL 422, plan scoping, ADO fallback to stored PAT. Add the new tables to `clean_db` truncation in `tests/conftest.py`; QA adds Postgres integration tests (`db` marker).
+- [x] Migration `0003`: `ado_credentials` (`id`, `user_id` FK cascade, `project_name`, `project_url`, `pat_encrypted`, `created_at`, `updated_at`, unique `(user_id, project_url)`) and nullable indexed `release_plans.owner_id` FK to `users`; update `app/models.py`.
+- [x] `app/services/credentials.py`: Fernet encrypt/decrypt, CRUD scoped to the user, lookup by normalized project URL.
+- [x] `app/schemas.py` models and `app/api/settings_routes.py` implementing the contract (responses never contain the PAT); reuse `parse_project_url` for URL/host validation; mount in `main.py` behind `require_user`.
+- [x] `app/services/plans.py`: every function takes the owner; visible = `owner_id == user OR owner_id IS NULL`; create sets the owner; update/delete enforce visibility (404 otherwise). MCP tools keep working through the unowned (`NULL`) path.
+- [x] `app/api/ado_routes.py`, `app/schemas.py`, `app/services/ado_http.py::ado_client`, and the `connection_field_errors` check in `ado_url.py`: make `pat` optional and fall back to the stored PAT for the session user; update the MCP `ado_fetch_backlog` wording only if behaviour changes (it should not).
+- [x] Unit tests: encryption round trip, ciphertext differs from plaintext, PAT absent from responses and logs, ownership 404s, duplicate URL 422, plan scoping, ADO fallback to stored PAT. Add the new tables to `clean_db` truncation in `tests/conftest.py`; QA adds Postgres integration tests (`db` marker).
 
 ### Verification Plan
 - `python3 -m compileall -q src/server/app && python3 -m pytest src/server -q` pass.
@@ -128,32 +128,52 @@ Status: Not started
 - Manual: save a PAT, then `SELECT pat_encrypted FROM ado_credentials` shows ciphertext; a second user cannot see or load the first user's boards or PATs.
 
 ### Phase Summary
-_(write when phase completes)_
+Backend only. New: migration `0003` (`ado_credentials`, `release_plans.owner_id` nullable FK, ON DELETE SET NULL so a deleted user's boards become shared), `services/credentials.py` (Fernet, user-scoped CRUD, `find_pat`), `api/settings_routes.py`, `require_user` now checks the user row (401 + session cleared), owner-scoped plans (`owner_id=None` = unscoped: MCP and auth-disabled paths), `pat` optional on `/api/ado/*` with stored-PAT fallback (explicit PAT wins; MCP still requires it). `PAT_ENCRYPTION_KEY` is now required at startup when auth is enabled (compose, Helm secret key `patEncryptionKey`, README, `.env.example` updated; existing deployments must add it before upgrading).
 
-## Phase 4: Prefill creation modals from stored PATs
-Status: Not started
+Decisions: URLs are stored in canonical form (cloud parse first, then on-prem); duplicates/lookups compare `lower(project_url)`; PUT with a changed canonical URL requires a new `pat` (422); foreign ids give 404; no signed-in user -> settings routes 409; missing key 503; unreadable stored PAT 422.
 
-- [ ] Make `pat` optional in the client request types (`lib/ado/api.ts`, `lib/releasePlan/adoApi.ts`, `lib/monteCarlo/api.ts`) and in `connectionErrors` (`lib/ado/url.ts`) when a stored credential applies.
-- [ ] `src/components/ado/AdoConnectModal.tsx`: when the project URL matches a stored credential (from `settingsStore`), show a masked "Using saved PAT (<project name>)" state and omit `pat` from the request; typing a PAT overrides it. Update help text (no longer "never stored").
-- [ ] Same behaviour in `src/components/releasePlan/AdoSyncModal.tsx` (`SyncForm`).
-- [ ] When no stored credential matches and the user typed a PAT, show a "Save PAT to my settings" button that creates the credential (project name defaulted from the modal's name field or the URL), refreshes the store and shows a toast.
-- [ ] Update the matching copy and tests in `monteCarlo/HelpModal.tsx` and any test asserting "never stored"; add tests: prefill on URL match, override, save button only when unmatched with typed PAT, request body has no `pat` when using a saved one.
+Verification (coordinator): compileall ok; pytest 1467 passed / 82 skipped (baseline 1342). QA with real Postgres 17: `-m db` 108 passed; migration 0003 up/down verified; QA added `test_multiuser_integration.py` (27 tests: isolation, ADO fallback, no PAT leakage, MCP unaffected) and fixed a stale column test in `test_db_migrations.py`. Iterations: 1 Develop, 1 QA, no fix cycle.
+
+Open minors: every protected route (incl. /validate, /simulate) now needs the DB; case-sensitive DB unique constraint vs lower() check (race; a functional unique index on `(user_id, lower(project_url))` would close it); a non-string `pat` in PUT is treated as "keep"; full-suite run with `TEST_DATABASE_URL` has one order-dependent failure in `test_lifespan_migrates_empty_schema_to_head_and_is_idempotent` (passes alone); Helm template not rendered; Phase 2 UI should surface the 422 on URL change without PAT.
+
+
+## Phase 4: Project pickers backed by stored PATs
+Status: Complete (delivered differently from the original design; see Phase Summary)
+
+Original design (superseded by decision, 2026-11-21): prefill the PAT field when the URL matches a stored credential, allow a one-off override, and show a "Save PAT to my settings" button. The user decided instead that the SPA never holds a PAT: projects are registered once in Settings and every Azure DevOps flow selects one.
+
+- [x] Make `pat` optional in the client request types (`lib/ado/types.ts`; flows to `AdoScopedRequest`, sprint-history and backlog requests); remove the PAT check from the connect form validation.
+- [x] `components/ado/AdoConnectModal.tsx` (Release Plan create, Monte Carlo load): source radios, URL and PAT inputs replaced by a "Project" select fed by `settingsStore` (`ensureLoaded`, loading/error+Retry, empty state with "Open settings"); the request sends `{source: sourceOf(url), projectUrl}` with no `pat`; last connected project remembered; server 422 shown inline with a hint/button to open Settings.
+- [x] `components/releasePlan/AdoSyncModal.tsx`: PAT field removed; the plan's stored project URL is matched (`sameProjectUrl`: case-insensitive, trailing slash ignored) to a Settings project; shows "Using the saved Personal Access Token of <name>" or "No saved Personal Access Token for this project." + "Open settings"; request omits `pat`.
+- [x] Settings modal polish: icon-only Add/Edit/Delete (Delete red, inverts on hover), text Retry/Save/Cancel/Close, On-Prem/Collaboration Hub radios (placeholder only, not stored; source inferred on edit), PAT shown only as dots + last 4 (`patLast4`, new server field; null when the PAT is shorter than 8 characters or unreadable).
+- [x] `settingsStore` exposes `settingsOpen/openSettings/closeSettings`; `SettingsButton` renders the modal from it so other modals can open Settings on top.
+- [x] Copy/specs: Monte Carlo `HelpModal`, `specs/release_plan.md`, `specs/authentication.md`, `AGENTS.md`, stale "PAT never persisted" comments.
+- [x] Tests rewritten/added (connect modal, sprint-history modal, sync modal, settings modal/button/store, `sourceOf`/`sameProjectUrl`); `AdoSourceSwitch.integration.test.tsx` deleted (the source switch no longer exists).
 
 ### Verification Plan
-- `cd src/client && npm run build && npm test -- --run` pass; `python3 -m pytest src/server -q` still passes.
-- Manual: with a saved PAT, Release Plan "create from ADO" and Monte Carlo "load from ADO" connect without typing a PAT; with none saved, entering a PAT shows "Save PAT to my settings" and saving it makes the next open prefilled.
+- `cd src/client && npm run build && npm test -- --run` pass; `python3 -m pytest src/server -q` passes.
+- Manual: with a saved project, Release Plan "create from ADO", Monte Carlo "load from ADO" and "Sync from ADO" work without typing a PAT; with none saved, the modals show "Open settings".
 
 ### Phase Summary
-_(write when phase completes)_
+See Final Recap for decisions. The "Save PAT to my settings" button of the original design was dropped because the modals no longer have a PAT field. The REST `pat` field remains optional and wins when present (tests, API clients); the MCP tools still require it.
 
 ## Final Recap
-_(write when all phases complete: summary of the entire piece of work)_
+Google SSO now protects the hub, and each user keeps their own Azure DevOps projects and PATs.
+
+- **Phase 1 (login):** server-side OIDC code flow with PKCE/state/nonce, signed session cookie (user id only), CSRF header on state-changing requests, `require_user` on every `/api` route except `/api/health`, `/api/auth/*` and `/api/mcp`; login page, route guard, user name and sign-out in the sidebar footer.
+- **Phase 2 (settings UI):** gear button opens a Settings modal to add/edit/delete projects (name, URL, PAT never shown; only dots + last 4 characters).
+- **Phase 3 (storage):** `ado_credentials` table with Fernet-encrypted PATs, `/api/settings/ado-credentials`, owner-scoped Release Plan boards (`owner_id`, NULL = shared/MCP), `require_user` checks the user row, `/api/ado/*` falls back to the user's stored PAT.
+- **Phase 4 (pickers):** the connect (Release Plan, Monte Carlo) and Sync modals no longer take a URL or PAT: users pick a configured project (Sync matches the plan's URL). No one-off PAT override (decision by the user).
+- **Verification at the end:** `pytest src/server` 1472 passed / 113 skipped; with real Postgres 17 (`TEST_DATABASE_URL`) 1584 passed; client build ok, 105 files / 1109 tests. QA passed every phase (one Develop <-> QA cycle each, no Blocker/Major left).
+- **Never exercised:** a real Google login (needs an OAuth client), the full docker compose stack, `helm template` rendering.
+
+Open minors: stateless logout (cookie valid until expiry); `/api/mcp` unauthenticated by design; board in localStorage survives sign-out; 401 mid-session loses unsaved Monte Carlo input; every protected route (incl. `/validate`, `/simulate`) needs the database; DB unique constraint on credentials is case-sensitive while the app check is case-insensitive (concurrent-create race; a unique index on `(user_id, lower(project_url))` would close it); a non-string `pat` in PUT is treated as "keep"; client URL matching in Sync only trims/lower-cases/strips trailing slashes (the server also drops `/_...` suffixes, query and fragment); Helm DB is `emptyDir`.
 
 ## Deployment Plan
-_(write when all phases complete: step-by-step deployment instructions)_
+1. **Google Cloud Console:** create an OAuth 2.0 Web client; authorized redirect URIs `https://<host>/api/auth/callback` (and `http://localhost:8080/api/auth/callback` for local use).
+2. **Secret** `cm-planning-hub-auth-secret` in the `cm-planning-hub` namespace with keys for `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET` (>= 32 random chars), `PAT_ENCRYPTION_KEY` (Fernet key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`). Existing deployments must add `patEncryptionKey` before upgrading or the server will not start. Key names follow `auth.secret.*` in `helm/chart/values.yaml`.
+3. **Values:** set `PUBLIC_BASE_URL` to the public https URL (cookies become `Secure`, redirect URI is derived from it); optionally `AUTH_ALLOWED_EMAIL_DOMAINS`. `FORWARDED_ALLOW_IPS` is set by compose/Helm so uvicorn trusts the proxy headers.
+4. **Deploy** with the manual Deploy workflow. Migrations `0002` (users) and `0003` (credentials, `owner_id`) run at server startup (`DB_MIGRATE_ON_STARTUP`); the chart runs one replica, so there is no race. Existing boards keep `owner_id` NULL and stay visible to all users.
+5. **Smoke test:** open the site -> redirected to `/login`; sign in; name appears in the sidebar; add a project in Settings; create a Release Plan from ADO without typing a PAT; `/api/plan` answers 401 without cookie; `/api/mcp` still answers.
+6. **Persistence warning:** the Helm DB uses `emptyDir`; users and stored PATs are lost on DB pod restart until a PVC is added. Rotating `PAT_ENCRYPTION_KEY` invalidates stored PATs (users must re-enter them; consider `MultiFernet` later).
 
-### Notes for the Deployment Plan (known facts, to be completed)
-- Needs a Google OAuth client with the production redirect URI and a Kubernetes/OpenShift Secret holding `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `PAT_ENCRYPTION_KEY`.
-- The Helm DB uses `emptyDir`: users and stored PATs are lost on DB pod restart until a PVC is added.
-- Startup migrations run in the server (`DB_MIGRATE_ON_STARTUP`); the chart runs one replica, so there is no migration race.
-- Rotating `PAT_ENCRYPTION_KEY` invalidates stored PATs (consider `MultiFernet` later).

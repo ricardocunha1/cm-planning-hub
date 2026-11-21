@@ -39,13 +39,13 @@ function stubServer(initial: AdoCredential[] = [], overrides: { list?: () => Res
       return overrides.list ? overrides.list() : json({ items });
     }
     if (url === LIST && method === "POST") {
-      const created = { id: nextId++, projectName: String(body?.projectName), projectUrl: String(body?.projectUrl), hasPat: true };
+      const created = { id: nextId++, projectName: String(body?.projectName), projectUrl: String(body?.projectUrl), hasPat: true, patLast4: null };
       items = [...items, created];
       return json(created, 201);
     }
     const id = Number(url.slice(LIST.length + 1));
     if (method === "PUT") {
-      const updated = { id, projectName: String(body?.projectName), projectUrl: String(body?.projectUrl), hasPat: true };
+      const updated = { id, projectName: String(body?.projectName), projectUrl: String(body?.projectUrl), hasPat: true, patLast4: null };
       items = items.map((item) => (item.id === id ? updated : item));
       return json(updated);
     }
@@ -59,7 +59,7 @@ function stubServer(initial: AdoCredential[] = [], overrides: { list?: () => Res
   return { calls, settingsCalls: () => calls.filter((call) => call.url.startsWith(LIST)) };
 }
 
-const ALPHA: AdoCredential = { id: 1, projectName: "Alpha", projectUrl: "https://dev.azure.com/org/Alpha", hasPat: true };
+const ALPHA: AdoCredential = { id: 1, projectName: "Alpha", projectUrl: "https://dev.azure.com/org/Alpha", hasPat: true, patLast4: null };
 
 async function openSettings(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Settings" }));
@@ -119,7 +119,8 @@ describe("settings flow through the app", () => {
     expect(post.body).toEqual({ projectName: "Gamma", projectUrl: "https://dev.azure.com/org/Gamma/", pat: SECRET });
     expect(post.headers.get("X-Requested-With")).toBe("planning-hub");
     expect(within(dialog).queryByLabelText("Personal Access Token")).not.toBeInTheDocument();
-    expect(within(dialog).getByText("PAT saved")).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("img", { name: "Personal Access Token saved" }).length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText(/PAT saved/)).not.toBeInTheDocument();
 
     // Edit without PAT: body has no pat key.
     await user.click(within(dialog).getByRole("button", { name: "Edit Gamma" }));

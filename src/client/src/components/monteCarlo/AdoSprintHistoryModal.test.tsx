@@ -3,12 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ADO_CONNECTION_KEY } from "../../lib/monteCarlo/constants";
 import { ADO_CONNECTION_KEY as RELEASE_PLAN_KEY } from "../../lib/releasePlan/constants";
-import { makeConnectResponse } from "../../test/adoFixtures";
+import { ADO_CREDENTIALS, makeConnectResponse } from "../../test/adoFixtures";
 import { makeSprintHistory } from "../../test/monteCarloFixtures";
+import { SignedIn } from "../../test/SignedIn";
 import { AdoSprintHistoryModal } from "./AdoSprintHistoryModal";
 
-const PAT = "s3cr3t-pat-value";
-const URL_OK = "https://dev.azure.com/org/Proj";
 
 type Handler = (init: RequestInit) => Response | Promise<Response>;
 
@@ -33,19 +32,20 @@ function mockFetch(handlers: { connect?: Handler; history?: Handler } = {}): Moc
 function renderModal() {
   const onClose = vi.fn();
   const onLoaded = vi.fn();
-  const view = render(<AdoSprintHistoryModal open onClose={onClose} onLoaded={onLoaded} />);
-  return { onClose, onLoaded, ...view };
+  const ui = (open: boolean) => (
+    <SignedIn credentials={ADO_CREDENTIALS}>
+      <AdoSprintHistoryModal open={open} onClose={onClose} onLoaded={onLoaded} />
+    </SignedIn>
+  );
+  const view = render(ui(true));
+  return { onClose, onLoaded, ui, ...view };
 }
 
-const urlInput = () => screen.getByLabelText("Project URL");
-const patInput = () => screen.getByLabelText("Personal Access Token");
+const projectSelect = () => screen.getByLabelText("Project");
 const submitButton = () => screen.getByRole("button", { name: /^(Load sprint history|Loading work items…)$/ });
 
-async function fillAndConnect(user: ReturnType<typeof userEvent.setup>, url = URL_OK) {
-  await user.click(screen.getByRole("radio", { name: "Collaboration Hub" }));
-  await user.clear(urlInput());
-  await user.type(urlInput(), url);
-  await user.type(patInput(), PAT);
+async function fillAndConnect(user: ReturnType<typeof userEvent.setup>, project = "Proj") {
+  await user.selectOptions(projectSelect(), project);
   await user.click(screen.getByRole("button", { name: "Connect" }));
 }
 
@@ -57,47 +57,43 @@ describe("AdoSprintHistoryModal", () => {
   });
 
   it("renders nothing when closed", () => {
-    render(<AdoSprintHistoryModal open={false} onClose={vi.fn()} onLoaded={vi.fn()} />);
+    render(
+      <SignedIn credentials={ADO_CREDENTIALS}>
+        <AdoSprintHistoryModal open={false} onClose={vi.fn()} onLoaded={vi.fn()} />
+      </SignedIn>,
+    );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("has the Monte Carlo title, the connection fields and a disabled 'Load sprint history'", () => {
+  it("has the Monte Carlo title, the project list (no source, URL or PAT fields) and a disabled 'Load sprint history'", () => {
     renderModal();
     expect(screen.getByRole("dialog", { name: "Load from Azure DevOps" })).toHaveAttribute("aria-modal", "true");
-    expect(screen.getByRole("radio", { name: "On-Prem" })).toBeInTheDocument();
-    expect(patInput()).toHaveAttribute("type", "password");
+    expect(projectSelect()).toHaveValue("");
+    expect(screen.queryByRole("radio", { name: "On-Prem" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Project URL")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Personal Access Token")).not.toBeInTheDocument();
     expect(submitButton()).toHaveTextContent("Load sprint history");
     expect(submitButton()).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Sync/ })).not.toBeInTheDocument();
   });
 
-  it("defaults to Collaboration Hub with its URL placeholder when no connection is remembered", () => {
-    renderModal();
-    expect(screen.getByRole("radio", { name: "Collaboration Hub" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "On-Prem" })).not.toBeChecked();
-    expect(urlInput()).toHaveValue("");
-    expect(urlInput()).toHaveAttribute("placeholder", "https://dev.azure.com/<ORGANIZATION>/<PROJECT_NAME>");
-  });
-
-  it("connects with the default source without touching the radios", async () => {
+  it("connects with the project's URL and the source inferred from its host, without a PAT", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch();
     renderModal();
-    await user.type(urlInput(), URL_OK);
-    await user.type(patInput(), PAT);
-    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await fillAndConnect(user);
     expect(await screen.findByRole("tree", { name: "Iteration path" })).toBeInTheDocument();
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/ado/connect");
-    expect(JSON.parse(String(init.body))).toMatchObject({ source: "cloud" });
+    expect(JSON.parse(String(init.body))).toEqual({ source: "cloud", projectUrl: "https://dev.azure.com/org/Proj" });
   });
 
-  it("checks the URL shape without a request", async () => {
+  it("asks to select a project without a request", async () => {
     const user = userEvent.setup();
     const fetchMock = mockFetch();
     renderModal();
-    await fillAndConnect(user, "https://dev.azure.com/org");
-    expect(screen.getByRole("alert")).toHaveTextContent("Collaboration Hub URLs look like https://dev.azure.com/<organization>/<project>.");
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Select an Azure DevOps project.");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -114,7 +110,7 @@ describe("AdoSprintHistoryModal", () => {
     expect(screen.getByLabelText("Search Iteration path")).toBeInTheDocument();
   });
 
-  it("remembers the connection under the Monte Carlo key only (never the PAT)", async () => {
+  it("remembers the project under the Monte Carlo key only", async () => {
     const user = userEvent.setup();
     mockFetch();
     renderModal();
@@ -125,20 +121,13 @@ describe("AdoSprintHistoryModal", () => {
       projectUrl: "https://dev.azure.com/org/Proj",
     });
     expect(window.localStorage.getItem(RELEASE_PLAN_KEY)).toBeNull();
-    for (let i = 0; i < window.localStorage.length; i++) {
-      expect(window.localStorage.getItem(window.localStorage.key(i) ?? "")).not.toContain(PAT);
-    }
   });
 
-  it("pre-fills from the Monte Carlo remembered connection, not Release Plan's", () => {
-    window.localStorage.setItem(RELEASE_PLAN_KEY, JSON.stringify({ source: "cloud", projectUrl: "https://dev.azure.com/o/RP" }));
+  it("pre-selects the Monte Carlo remembered project, not Release Plan's", () => {
+    window.localStorage.setItem(RELEASE_PLAN_KEY, JSON.stringify({ source: "cloud", projectUrl: "https://dev.azure.com/org/Proj" }));
     window.localStorage.setItem(ADO_CONNECTION_KEY, JSON.stringify({ source: "onprem", projectUrl: "https://tfs.example.com/C/P" }));
     renderModal();
-    expect(screen.getByRole("radio", { name: "On-Prem" })).toBeChecked();
-    expect(screen.getByRole("radio", { name: "Collaboration Hub" })).not.toBeChecked();
-    expect(urlInput()).toHaveAttribute("placeholder", "https://tfs-projects.cmf.criticalmanufacturing.com/ImplementationProjects/<PROJECT_NAME>");
-    expect(urlInput()).toHaveValue("https://tfs.example.com/C/P");
-    expect(patInput()).toHaveValue("");
+    expect(projectSelect()).toHaveValue("12");
   });
 
   it("loads the sprint history for the picked Iteration path and hands it over", async () => {
@@ -163,7 +152,6 @@ describe("AdoSprintHistoryModal", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       source: "cloud",
       projectUrl: "https://dev.azure.com/org/Proj",
-      pat: PAT,
       iterationPath: "Proj\\Phase 1",
     });
   });
@@ -182,7 +170,7 @@ describe("AdoSprintHistoryModal", () => {
     release(json({ errors: [message] }, 422));
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
     expect(submitButton()).toBeEnabled();
-    expect(patInput()).toHaveValue(PAT);
+    expect(projectSelect()).toHaveValue("11");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(onLoaded).not.toHaveBeenCalled();
   });
@@ -199,12 +187,12 @@ describe("AdoSprintHistoryModal", () => {
           }
         }),
     });
-    const { onLoaded, onClose, rerender } = renderModal();
+    const { onLoaded, ui, rerender } = renderModal();
     await fillAndConnect(user);
     await user.click(within(await screen.findByRole("tree")).getByRole("treeitem", { name: /^Phase 1/ }));
     await user.click(submitButton());
     expect(signals).toHaveLength(1);
-    rerender(<AdoSprintHistoryModal open={false} onClose={onClose} onLoaded={onLoaded} />);
+    rerender(ui(false));
     expect(signals[0].aborted).toBe(true);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(onLoaded).not.toHaveBeenCalled();

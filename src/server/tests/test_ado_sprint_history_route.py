@@ -375,7 +375,6 @@ def test_sprint_history_all_fields_missing_reports_every_message(ado_client, fak
     assert _errors(ado_client.post(ROUTE, json={})) == [
         "Choose the Azure DevOps source (On-Prem or Collaboration Hub).",
         "Enter the Azure DevOps project URL.",
-        "Enter a Personal Access Token.",
         "Choose an Iteration path.",
     ]
     assert fake.requests == []
@@ -410,7 +409,7 @@ def test_sprint_history_connection_errors_make_no_request(ado_client, fake, over
 @pytest.mark.parametrize("content", [b"not json", b"[1]", b"", b"null"])
 def test_sprint_history_unreadable_body_reports_field_messages(ado_client, content):
     response = ado_client.post(ROUTE, content=content, headers={"Content-Type": "application/json"})
-    assert len(_errors(response)) == 4
+    assert len(_errors(response)) == 3
 
 
 # --- 422: ADO errors passed through ------------------------------------------------------------------

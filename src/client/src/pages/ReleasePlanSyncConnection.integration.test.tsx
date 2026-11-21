@@ -1,4 +1,4 @@
-// QA integration tests for the read-only "Sync from ADO" connection (only the PAT is entered; the
+// QA integration tests for the read-only "Sync from ADO" connection (no PAT is entered: the saved Settings PAT is used; the
 // project URL and Area/Iteration path come from plan.source).
 // Real App routes, pages, store and real adoApi/planApi; only `fetch`
 // and the browser download boundary are mocked.
@@ -11,15 +11,18 @@ import { ToastProvider } from "../components/Toast";
 import { planFromBacklog } from "../lib/releasePlan/fromBacklog";
 import type { ReleasePlan } from "../lib/releasePlan/types";
 import { ForecastProvider } from "../monteCarloStore";
+import { SettingsProvider } from "../settingsStore";
+import type { AdoCredential } from "../lib/settings/types";
 import { makeBacklog, makeConnection } from "../test/adoFixtures";
 import { planDetail } from "../test/planServer";
 import { sequentialIds } from "../test/releasePlanFixtures";
 import { AuthProvider } from "../authStore";
 import { TEST_USER } from "../test/authFixtures";
 
-const PAT = "qa-readonly-sync-pat-0123456789";
 const TIMEOUT = 30_000;
 const FIND = { timeout: 5_000 };
+
+const CLOUD_CREDENTIAL: AdoCredential = { id: 31, projectName: "Board A", projectUrl: "https://dev.azure.com/contoso/Board%20A", hasPat: true, patLast4: "0123" };
 
 const CLOUD = makeConnection({
   source: "cloud",
@@ -50,9 +53,11 @@ function renderApp(path: string) {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider initialItems={[CLOUD_CREDENTIAL]}>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );
@@ -104,13 +109,15 @@ function expectConnectionShown(dialog: HTMLElement, c: typeof CLOUD) {
   expect(shown(dialog, "Project URL")).toBe(c.projectUrl);
   expect(shown(dialog, c.scopeType === "area" ? "Area path" : "Iteration path")).toBe(c.scopePath);
   expect(shown(dialog, c.scopeType === "area" ? "Iteration path" : "Area path")).toBeNull();
-  // Nothing about the connection is editable: the PAT is the only form control besides the buttons.
+  // Nothing about the connection is editable, and the only input is the read-only redacted PAT.
   expect(within(dialog).queryAllByRole("radio")).toHaveLength(0);
-  expect(within(dialog).queryAllByRole("textbox")).toHaveLength(0);
   expect(within(dialog).queryByRole("tree")).not.toBeInTheDocument();
   expect(within(dialog).queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
   expect(dialog.querySelectorAll("input")).toHaveLength(1);
-  expect(within(dialog).getByLabelText("Personal Access Token")).toHaveValue("");
+  const pat = within(dialog).getByLabelText("Personal Access Token");
+  expect(pat).toHaveAttribute("readonly");
+  expect(pat).toHaveValue("\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 0123");
+  expect(within(dialog).getByText(/Saved in Settings as/)).toHaveTextContent("Board A");
 }
 
 describe("Release Plan – read-only Sync connection restored from storage (integration)", { timeout: TIMEOUT }, () => {
@@ -121,7 +128,7 @@ describe("Release Plan – read-only Sync connection restored from storage (inte
     window.localStorage.clear();
   });
 
-  it("shows the stored plan's connection read-only and Sync posts it with the typed PAT", async () => {
+  it("shows the stored plan's connection read-only and Sync posts it without a PAT", async () => {
     const user = userEvent.setup();
     const fetchMock = mockBacklog(linkedPlan(CLOUD, "Board A"));
     renderApp("/release-plan/1");
@@ -129,11 +136,10 @@ describe("Release Plan – read-only Sync connection restored from storage (inte
     fetchMock.mockClear();
     const dialog = await openSync(user);
     expectConnectionShown(dialog, CLOUD);
-    await user.type(within(dialog).getByLabelText("Personal Access Token"), PAT);
     await user.click(within(dialog).getByRole("button", { name: "Preview changes" }));
     await screen.findByRole("button", { name: "Apply" }, FIND);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ ...CLOUD, pat: PAT });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual(CLOUD);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await closeSync(user, await openSync(user));
   });
@@ -149,14 +155,13 @@ describe("Release Plan – read-only Sync connection restored from storage (inte
     renderApp("/release-plan/1");
     await screen.findByRole("region", { name: "Milestone summary" }, FIND);
     const dialog = await openSync(user);
-    expect(within(dialog).getByLabelText("Personal Access Token")).toBeInTheDocument();
-    await user.type(within(dialog).getByLabelText("Personal Access Token"), `${PAT}{Enter}`);
+    await user.click(within(dialog).getByRole("button", { name: "Preview changes" }));
     expect(await within(dialog).findByRole("alert", {}, FIND)).toHaveTextContent("Select an Area or Iteration path.");
     expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
     expect(screen.getByTestId("save-status")).toHaveTextContent("Saved");
   });
 
-  it("focus goes to the PAT input on open and returns to the Sync button on close", async () => {
+  it("focus moves into the dialog on open and returns to the Sync button on close", async () => {
     const user = userEvent.setup();
     mockBacklog(linkedPlan(CLOUD, "Board A"));
     renderApp("/release-plan/1");
@@ -165,7 +170,7 @@ describe("Release Plan – read-only Sync connection restored from storage (inte
     await user.click(button);
     const dialog = syncDialog();
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(within(dialog).getByLabelText("Personal Access Token")).toHaveFocus();
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(button).toHaveFocus();

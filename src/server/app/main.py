@@ -16,6 +16,7 @@ from app.api.auth_routes import router as auth_router
 from app.api.deps import ApiError, require_csrf, require_user
 from app.api.plan_routes import router as plan_router
 from app.api.routes import public_router, router
+from app.api.settings_routes import router as settings_router
 from app.config import Settings, get_settings
 from app.db import dispose_engine, migrate_to_head, wait_for_database
 from app.mcp_server.server import MCP_PATH, create_mcp_app, create_mcp_server
@@ -121,6 +122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(router, prefix="/api", dependencies=protected)
     app.include_router(ado_router, prefix="/api/ado", dependencies=protected)
     app.include_router(plan_router, prefix="/api/plan", dependencies=protected)
+    app.include_router(settings_router, prefix="/api/settings/ado-credentials", dependencies=protected)
     app.router.routes.append(Route(MCP_PATH, endpoint=McpEndpoint()))
     return app
 

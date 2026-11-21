@@ -2,7 +2,8 @@ import type { AdoSource } from "./types";
 
 /**
  * The remembered connection: source and canonical project URL only. There is
- * deliberately no token field: the personal access token is never persisted.
+ * deliberately no token field: the SPA never persists a token in the
+ * browser (PATs are stored encrypted on the server, per user, via Settings).
  * Each tool remembers its own under its own localStorage key
  * (Release Plan: `ADO_CONNECTION_KEY` in `lib/releasePlan/constants.ts`,
  * Monte Carlo: `ADO_CONNECTION_KEY` in `lib/monteCarlo/constants.ts`).

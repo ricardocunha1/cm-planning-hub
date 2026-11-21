@@ -5,6 +5,7 @@ import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import type { DataSource } from "./lib/monteCarlo/types";
 import { ForecastProvider } from "./monteCarloStore";
+import { SettingsProvider } from "./settingsStore";
 import { excelSource } from "./test/monteCarloFixtures";
 import { AuthProvider } from "./authStore";
 import { TEST_USER } from "./test/authFixtures";
@@ -14,9 +15,11 @@ function renderApp(path: string, dataSource: DataSource | null = null) {
   render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider initialDataSource={dataSource}>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider>
+          <ForecastProvider initialDataSource={dataSource}>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );

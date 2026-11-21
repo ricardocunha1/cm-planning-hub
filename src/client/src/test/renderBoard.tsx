@@ -1,4 +1,5 @@
 import type { ReleasePlan } from "../lib/releasePlan/types";
+import type { AdoCredential } from "../lib/settings/types";
 import { ReleasePlanBoardPage } from "../pages/ReleasePlanBoardPage";
 import { renderAt } from "./render";
 
@@ -8,12 +9,14 @@ export const BOARD_PLAN_ID = 1;
 /**
  * Renders the real board page at `/release-plan/1` with `plan` already in the
  * store as plan 1 (so the page doesn't fetch). With `null` the store is empty and the page loads plan 1 from the server.
+ * `credentials` starts the settings store loaded with those Azure DevOps projects (default: unfetched).
  */
-export function renderBoard(plan: ReleasePlan | null) {
+export function renderBoard(plan: ReleasePlan | null, credentials?: AdoCredential[]) {
   return renderAt("/release-plan/:id", <ReleasePlanBoardPage />, {
     initialPlan: plan,
     initialPlanId: plan ? BOARD_PLAN_ID : null,
     initialEntry: `/release-plan/${BOARD_PLAN_ID}`,
+    initialCredentials: credentials,
   });
 }
 

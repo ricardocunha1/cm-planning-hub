@@ -51,10 +51,10 @@ export function HelpModal({ open, onClose }: { open: boolean; onClose: () => voi
               takes you back to pick another one.
             </p>
             <p className="mt-2">
-              <strong>Load from Azure DevOps</strong> connects to your project (On-Prem or
-              Collaboration Hub, its project URL and a Personal Access Token with the{" "}
-              <strong>Work Items (Read)</strong> scope; the token is only used for the request
-              and is never stored). Pick an Iteration Path: the User Stories and Bugs under it
+              <strong>Load from Azure DevOps</strong> connects to one of the Azure DevOps
+              projects you configured in <strong>Settings</strong> (its project URL and a
+              Personal Access Token with the <strong>Work Items (Read)</strong> scope, stored
+              encrypted on the server). Pick an Iteration Path: the User Stories and Bugs under it
               (child paths included) in state <code className={code}>Resolved</code>,{" "}
               <code className={code}>Done</code> or <code className={code}>Closed</code> are loaded
               once as the sprint history, grouped by their own iteration.

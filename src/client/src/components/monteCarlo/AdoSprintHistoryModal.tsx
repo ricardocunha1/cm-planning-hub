@@ -7,8 +7,8 @@ import type { AdoSprintHistory } from "../../lib/monteCarlo/types";
 const SCOPE_TYPES: AdoScopeTypes = ["iteration"];
 
 /** Loads the sprint history for the Iteration path picked in the modal. */
-const loadSprintHistory = ({ source, projectUrl, pat, scopePath }: AdoScopedRequest, signal: AbortSignal): Promise<AdoSprintHistory> =>
-  adoSprintHistory({ source, projectUrl, pat, iterationPath: scopePath }, signal);
+const loadSprintHistory = ({ source, projectUrl, scopePath }: AdoScopedRequest, signal: AbortSignal): Promise<AdoSprintHistory> =>
+  adoSprintHistory({ source, projectUrl, iterationPath: scopePath }, signal);
 
 /**
  * Monte Carlo's "Load from Azure DevOps" modal: the shared

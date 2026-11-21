@@ -13,10 +13,13 @@ function json(body: unknown, status = 200): Response {
 }
 
 function Probe() {
-  const { items, status, ensureLoaded, load, add, update, remove } = useSettings();
+  const { items, status, ensureLoaded, load, add, update, remove, settingsOpen, openSettings, closeSettings } = useSettings();
   return (
     <div>
       <p data-testid="status">{status}</p>
+      <p data-testid="open">{String(settingsOpen)}</p>
+      <button onClick={openSettings}>open settings</button>
+      <button onClick={closeSettings}>close settings</button>
       <p data-testid="names">{items.map((item) => item.projectName).join(",")}</p>
       <button onClick={() => void ensureLoaded()}>ensure</button>
       <button onClick={() => void load()}>load</button>
@@ -110,7 +113,7 @@ describe("SettingsProvider", () => {
   it("adds, updates and removes items in state", async () => {
     const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
       if (init?.method === "POST") {
-        return Promise.resolve(json({ id: 3, projectName: "Gamma", projectUrl: "https://dev.azure.com/o/G", hasPat: true }, 201));
+        return Promise.resolve(json({ id: 3, projectName: "Gamma", projectUrl: "https://dev.azure.com/o/G", hasPat: true, patLast4: null }, 201));
       }
       if (init?.method === "PUT") {
         return Promise.resolve(json({ ...CREDENTIALS[0], projectName: "Alpha2" }));
@@ -155,9 +158,28 @@ describe("SettingsProvider", () => {
     expect(screen.getByTestId("names")).toBeEmptyDOMElement();
   });
 
+  it("opens and closes the Settings modal state without fetching", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <Harness>
+        <Probe />
+      </Harness>,
+    );
+    expect(screen.getByTestId("open")).toHaveTextContent("false");
+    await userEvent.click(screen.getByText("open settings"));
+    expect(screen.getByTestId("open")).toHaveTextContent("true");
+    await userEvent.click(screen.getByText("close settings"));
+    expect(screen.getByTestId("open")).toHaveTextContent("false");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("useSettings outside the provider throws", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const swallow = (event: ErrorEvent) => event.preventDefault(); // jsdom reports the render error on window
+    window.addEventListener("error", swallow);
     expect(() => render(<Probe />)).toThrow("useSettings must be used inside a SettingsProvider");
+    window.removeEventListener("error", swallow);
     spy.mockRestore();
   });
 });

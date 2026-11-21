@@ -37,7 +37,8 @@ export function deleteRequest(url: string, signal?: AbortSignal): Promise<void> 
 
 /**
  * POST /api/ado/connect: validates the URL + PAT and returns the project with
- * its Area and Iteration trees. The PAT travels in the JSON body only.
+ * its Area and Iteration trees. Without `pat` the server uses the one stored for the
+ * signed-in user and `projectUrl` (422 when none).
  * @throws ApiError with the server's messages (422 `{errors}`); an `AbortError` when `signal` aborts.
  */
 export function adoConnect(req: AdoConnectionRequest, signal?: AbortSignal): Promise<AdoConnectResponse> {

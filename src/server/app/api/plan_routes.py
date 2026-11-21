@@ -8,6 +8,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_user
 from app.db import DB_ERRORS, DB_UNAVAILABLE, get_session
 from app.schemas import (
     ErrorResponse,
@@ -89,15 +90,21 @@ def _parse_body(data: dict, model: type[M], *, with_project: bool) -> M | JSONRe
 
 
 @router.get("", response_model=PlanListResponse, response_model_by_alias=True, responses=ERROR_RESPONSES)
-async def list_plans(page: int = Query(1, ge=1), session: AsyncSession = Depends(get_session)):
-    """One page of plans, most recently updated first."""
-    items, total = await plans.list_plans(session, page)
+async def list_plans(
+    page: int = Query(1, ge=1),
+    session: AsyncSession = Depends(get_session),
+    user_id: int | None = Depends(require_user),
+):
+    """One page of the user's visible plans (own and unowned), most recently updated first."""
+    items, total = await plans.list_plans(session, page, user_id)
     return PlanListResponse(items=items, total=total, page=page, pageSize=PLAN_PAGE_SIZE)
 
 
 @router.get("/{plan_id}", response_model=PlanDetail, response_model_by_alias=True, responses=ERROR_RESPONSES)
-async def get_plan(plan_id: int, session: AsyncSession = Depends(get_session)):
-    plan = await plans.get_plan(session, plan_id)
+async def get_plan(
+    plan_id: int, session: AsyncSession = Depends(get_session), user_id: int | None = Depends(require_user)
+):
+    plan = await plans.get_plan(session, plan_id, user_id)
     return plan if plan else _not_found(plan_id)
 
 
@@ -109,14 +116,17 @@ async def get_plan(plan_id: int, session: AsyncSession = Depends(get_session)):
     responses=ERROR_RESPONSES,
     openapi_extra=_request_body(PlanCreateRequest),
 )
-async def create_plan(request: Request, session: AsyncSession = Depends(get_session)):
-    """JSON `{name, projectType, projectName, state}`. The body is read
-    manually so the name/state 422s carry the contract's exact messages."""
+async def create_plan(
+    request: Request, session: AsyncSession = Depends(get_session), user_id: int | None = Depends(require_user)
+):
+    """JSON `{name, projectType, projectName, state}`; the plan is owned by the
+    signed-in user. The body is read manually so the name/state 422s carry the
+    contract's exact messages."""
     payload = _parse_body(await _read_json_object(request), PlanCreateRequest, with_project=True)
     if isinstance(payload, JSONResponse):
         return payload
     created = await plans.create_plan(
-        session, payload.name, payload.project_type, payload.project_name, payload.state
+        session, payload.name, payload.project_type, payload.project_name, payload.state, user_id
     )
     return JSONResponse(status_code=201, content=created.model_dump(mode="json", by_alias=True))
 
@@ -128,17 +138,25 @@ async def create_plan(request: Request, session: AsyncSession = Depends(get_sess
     responses=ERROR_RESPONSES,
     openapi_extra=_request_body(PlanUpdateRequest),
 )
-async def update_plan(plan_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    """JSON `{name, state}`; extra keys are ignored. Last write wins."""
+async def update_plan(
+    plan_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user_id: int | None = Depends(require_user),
+):
+    """JSON `{name, state}`; extra keys are ignored. Last write wins. 404 for a
+    plan owned by someone else."""
     payload = _parse_body(await _read_json_object(request), PlanUpdateRequest, with_project=False)
     if isinstance(payload, JSONResponse):
         return payload
-    updated = await plans.update_plan(session, plan_id, payload.name, payload.state)
+    updated = await plans.update_plan(session, plan_id, payload.name, payload.state, user_id)
     return updated if updated else _not_found(plan_id)
 
 
 @router.delete("/{plan_id}", status_code=204, responses=ERROR_RESPONSES)
-async def delete_plan(plan_id: int, session: AsyncSession = Depends(get_session)):
-    if not await plans.delete_plan(session, plan_id):
+async def delete_plan(
+    plan_id: int, session: AsyncSession = Depends(get_session), user_id: int | None = Depends(require_user)
+):
+    if not await plans.delete_plan(session, plan_id, user_id):
         return _not_found(plan_id)
     return Response(status_code=204)

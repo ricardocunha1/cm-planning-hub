@@ -1,9 +1,13 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { PAT_REQUIRED, URL_REQUIRED, validateProjectUrl } from "../../lib/ado/url";
+import { PAT_REQUIRED, PLACEHOLDER, sameProjectUrl, SOURCE_LABELS, sourceOf, URL_REQUIRED, validateProjectUrl } from "../../lib/ado/url";
+import type { AdoSource } from "../../lib/ado/types";
 import type { AdoCredential } from "../../lib/settings/types";
 import { useSettings } from "../../settingsStore";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { PencilIcon } from "../icons/PencilIcon";
+import { PlusIcon } from "../icons/PlusIcon";
+import { TrashIcon } from "../icons/TrashIcon";
 import { errorMessages, useToast } from "../Toast";
 import { useDialog } from "../useDialog";
 
@@ -11,15 +15,23 @@ import { useDialog } from "../useDialog";
 export const NAME_REQUIRED = "Enter a project name.";
 /** Masked stand-in shown for a stored PAT; the real PAT is never rendered. */
 export const MASKED_PAT = "••••••••";
+/** Error shown when an edit changes the project URL without re-entering the PAT (the server refuses to reuse the saved one). */
+export const PAT_REQUIRED_URL_CHANGED = "Enter the Personal Access Token again: the project URL changed.";
 
 const inputClass =
   "block w-full rounded border border-line-bold bg-canvas px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
+const focusRing = "focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
 const primaryButton =
   "rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-surface";
 const secondaryButton =
   "rounded border border-line-bold px-4 py-2 text-sm font-medium text-fg-soft hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
 const smallButton =
   "rounded border border-line-bold px-2.5 py-1 text-xs font-medium text-fg-soft hover:bg-surface-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
+const iconButton = `inline-flex h-8 w-8 items-center justify-center rounded border border-line-bold text-fg-soft hover:bg-surface-raised ${focusRing}`;
+/** Delete: red icon and border on a neutral background; inverts to white on red on hover/focus. */
+export const dangerButton = `inline-flex h-8 w-8 items-center justify-center rounded border border-danger bg-transparent text-danger hover:bg-danger hover:text-white focus-visible:bg-danger focus-visible:text-white ${focusRing}`;
+
+const SOURCES: readonly AdoSource[] = ["onprem", "cloud"];
 
 type Field = "name" | "url" | "pat";
 
@@ -47,7 +59,12 @@ function urlError(url: string): string | null {
   if (cloud === null || onprem === null) {
     return null;
   }
-  return /^https:\/\/([^/]+\.)?(dev\.azure\.com|visualstudio\.com)(\/|$)/i.test(url.trim()) ? cloud : onprem;
+  return sourceOf(url) === "cloud" ? cloud : onprem;
+}
+
+/** Whether an edit changes the project URL (canonical comparison); an invalid-shape URL is reported by its own error. */
+function urlChanged(target: FormTarget, url: string): boolean {
+  return target.mode === "edit" && url.trim() !== "" && !sameProjectUrl(target.credential.projectUrl, url);
 }
 
 function formErrors(target: FormTarget, name: string, url: string, pat: string): FormErrors {
@@ -66,6 +83,10 @@ function formErrors(target: FormTarget, name: string, url: string, pat: string):
     messages.push(PAT_REQUIRED);
     fields.add("pat");
   }
+  if (target.mode === "edit" && !pat.trim() && urlChanged(target, url)) {
+    messages.push(PAT_REQUIRED_URL_CHANGED);
+    fields.add("pat");
+  }
   return { messages, fields };
 }
 
@@ -78,7 +99,7 @@ export interface SettingsModalProps {
 /**
  * User settings: manage the Azure DevOps credentials (project name, project URL, PAT)
  * stored on the server. Loads the list when it opens. Stored PATs are never shown, only
- * a masked "PAT saved" indicator; the PAT field is a password input that opts out of
+ * a masked indicator (dots plus the last 4 characters); the PAT field is a password input that opts out of
  * password managers, is required when adding, and on edit an empty value keeps the saved
  * PAT (it is then omitted from the request). The typed PAT lives only in the form's
  * state and is cleared after a save and when the modal closes. Failed requests show a toast.
@@ -103,6 +124,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [pat, setPat] = useState("");
+  const [source, setSource] = useState<AdoSource>("cloud");
   const [errors, setErrors] = useState<FormErrors>(NO_ERRORS);
   const [pending, setPending] = useState(false);
   const [toDelete, setToDelete] = useState<AdoCredential | null>(null);
@@ -124,6 +146,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
     setTarget(next);
     setName(next.mode === "edit" ? next.credential.projectName : "");
     setUrl(next.mode === "edit" ? next.credential.projectUrl : "");
+    setSource(next.mode === "edit" ? sourceOf(next.credential.projectUrl) : "cloud");
     setPat("");
     setErrors(NO_ERRORS);
   };
@@ -192,6 +215,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
 
   const editing = target?.mode === "edit";
+  const patMustBeRetyped = target !== null && urlChanged(target, url) && !pat.trim();
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -213,8 +237,8 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
             <div className="flex items-center justify-between gap-3">
               <h3 className="font-medium text-fg-soft">Azure DevOps projects</h3>
               {!target && status === "ready" && (
-                <button type="button" onClick={() => openForm({ mode: "add" })} className={smallButton}>
-                  Add project
+                <button type="button" onClick={() => openForm({ mode: "add" })} aria-label="Add project" title="Add project" className={iconButton}>
+                  <PlusIcon />
                 </button>
               )}
             </div>
@@ -242,8 +266,12 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                       <p className="truncate font-medium text-fg">{item.projectName}</p>
                       <p className="truncate text-xs text-fg-subtle">{item.projectUrl}</p>
                       {item.hasPat && (
-                        <p className="text-xs text-fg-muted">
-                          <span aria-hidden="true">{MASKED_PAT}</span> <span>PAT saved</span>
+                        <p
+                          className="text-xs text-fg-muted"
+                          aria-label={item.patLast4 ? `Personal Access Token ending in ${item.patLast4}` : "Personal Access Token saved"}
+                          role="img"
+                        >
+                          <span aria-hidden="true">{item.patLast4 ? `${MASKED_PAT} ${item.patLast4}` : MASKED_PAT}</span>
                         </p>
                       )}
                     </div>
@@ -252,17 +280,19 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                         type="button"
                         onClick={() => openForm({ mode: "edit", credential: item })}
                         aria-label={`Edit ${item.projectName}`}
-                        className={smallButton}
+                        title={`Edit ${item.projectName}`}
+                        className={iconButton}
                       >
-                        Edit
+                        <PencilIcon />
                       </button>
                       <button
                         type="button"
                         onClick={() => setToDelete(item)}
                         aria-label={`Delete ${item.projectName}`}
-                        className={smallButton}
+                        title={`Delete ${item.projectName}`}
+                        className={dangerButton}
                       >
-                        Delete
+                        <TrashIcon className="h-4 w-4" />
                       </button>
                     </div>
                   </li>
@@ -290,6 +320,24 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                   className={inputClass}
                 />
               </div>
+              <fieldset>
+                <legend className="mb-1 font-medium text-fg-soft">Azure DevOps source</legend>
+                <div className="flex flex-wrap gap-4">
+                  {SOURCES.map((value) => (
+                    <label key={value} className="flex items-center gap-2 text-fg-soft">
+                      <input
+                        type="radio"
+                        name="settings-ado-source"
+                        value={value}
+                        checked={source === value}
+                        onChange={() => setSource(value)}
+                        className="accent-[color:var(--cm-light-blue)]"
+                      />
+                      {SOURCE_LABELS[value]}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
               <div className="space-y-1">
                 <label htmlFor={urlId} className="block font-medium text-fg-soft">
                   Project URL
@@ -298,7 +346,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                   id={urlId}
                   type="url"
                   value={url}
-                  placeholder="https://dev.azure.com/<ORGANIZATION>/<PROJECT_NAME>"
+                  placeholder={PLACEHOLDER[source]}
                   onChange={(event) => setUrl(event.target.value)}
                   spellCheck={false}
                   {...invalidProps("url")}
@@ -322,7 +370,8 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                   className={inputClass}
                 />
                 <p id={patHelpId} className="text-xs text-fg-subtle">
-                  {editing ? "Leave blank to keep the saved PAT. " : ""}Needs the Work Items (Read) scope.
+                  {patMustBeRetyped ? PAT_REQUIRED_URL_CHANGED : editing ? "Leave blank to keep the saved PAT. " : ""}
+                  {patMustBeRetyped ? " " : ""}Needs the Work Items (Read) scope.
                 </p>
               </div>
               {errors.messages.length > 0 && (

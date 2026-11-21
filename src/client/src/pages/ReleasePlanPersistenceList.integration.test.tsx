@@ -8,7 +8,8 @@ import { appRoutes } from "../App";
 import { ToastProvider } from "../components/Toast";
 import type { PlanSummary } from "../lib/releasePlan/planTypes";
 import { ForecastProvider } from "../monteCarloStore";
-import { makeBacklog, makeConnectResponse } from "../test/adoFixtures";
+import { SettingsProvider } from "../settingsStore";
+import { makeBacklog, makeConnectResponse, MY_PROJ_CREDENTIAL } from "../test/adoFixtures";
 import { AuthProvider } from "../authStore";
 import { TEST_USER } from "../test/authFixtures";
 
@@ -39,9 +40,11 @@ function renderApp(path: string) {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider initialItems={[MY_PROJ_CREDENTIAL]}>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );
@@ -117,10 +120,7 @@ const adoDialog = () => screen.getByRole("dialog", { name: "Create from Azure De
 async function reachPlanNameStep(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /Create from Azure DevOps/ }));
   const dialog = adoDialog();
-  await user.click(within(dialog).getByRole("radio", { name: "On-Prem" }));
-  await user.clear(within(dialog).getByLabelText("Project URL"));
-  await user.type(within(dialog).getByLabelText("Project URL"), CANONICAL);
-  await user.type(within(dialog).getByLabelText("Personal Access Token"), PAT);
+  await user.selectOptions(within(dialog).getByLabelText("Project"), "My Proj");
   await user.click(within(dialog).getByRole("button", { name: "Connect" }));
   await screen.findByRole("tree", { name: "Area path" }, FIND);
   await user.click(within(dialog).getByRole("radio", { name: "Iteration path" }));

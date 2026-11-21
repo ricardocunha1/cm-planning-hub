@@ -6,6 +6,7 @@ import { appRoutes } from "./App";
 import { ToastProvider } from "./components/Toast";
 import { SIDEBAR_COLLAPSED_KEY } from "./lib/sidebarPreference";
 import { ForecastProvider } from "./monteCarloStore";
+import { SettingsProvider } from "./settingsStore";
 import { stubPlanServer } from "./test/planServer";
 import { samplePlan } from "./test/releasePlanFixtures";
 import { AuthProvider } from "./authStore";
@@ -40,9 +41,11 @@ function renderApp(path = "/") {
   return render(
     <ToastProvider>
       <AuthProvider initialUser={TEST_USER}>
-        <ForecastProvider>
-          <RouterProvider router={router} />
-        </ForecastProvider>
+        <SettingsProvider>
+          <ForecastProvider>
+            <RouterProvider router={router} />
+          </ForecastProvider>
+        </SettingsProvider>
       </AuthProvider>
     </ToastProvider>,
   );

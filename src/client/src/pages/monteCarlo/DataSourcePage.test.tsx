@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useForecast } from "../../monteCarloStore";
-import { makeConnectResponse } from "../../test/adoFixtures";
+import { ADO_CREDENTIALS, makeConnectResponse } from "../../test/adoFixtures";
 import { makeSprintHistory, result, validation } from "../../test/monteCarloFixtures";
 import { renderAt } from "../../test/render";
 import { DataSourcePage } from "./DataSourcePage";
@@ -22,13 +22,11 @@ function mockAdo(history: Response = json(makeSprintHistory())) {
   return fetchMock;
 }
 
-/** Runs the ADO modal: Collaboration Hub, URL, PAT, Connect, "Phase 1", Load sprint history. */
+/** Runs the ADO modal: project, Connect, "Phase 1", Load sprint history. */
 async function loadFromAdo(user: ReturnType<typeof userEvent.setup>) {
   await user.click(adoCard());
   const dialog = screen.getByRole("dialog", { name: "Load from Azure DevOps" });
-  await user.click(within(dialog).getByRole("radio", { name: "Collaboration Hub" }));
-  await user.type(within(dialog).getByLabelText("Project URL"), "https://dev.azure.com/org/Proj");
-  await user.type(within(dialog).getByLabelText("Personal Access Token"), "pat-value");
+  await user.selectOptions(within(dialog).getByLabelText("Project"), "Proj");
   await user.click(within(dialog).getByRole("button", { name: "Connect" }));
   await user.click(within(await screen.findByRole("tree", { name: "Iteration path" })).getByRole("treeitem", { name: /^Phase 1/ }));
   await user.click(within(dialog).getByRole("button", { name: "Load sprint history" }));
@@ -53,14 +51,14 @@ describe("DataSourcePage", () => {
   });
 
   it("renders inside the Monte Carlo layout as the Data Source step", () => {
-    renderAt("/monte-carlo", <DataSourcePage />);
+    renderAt("/monte-carlo", <DataSourcePage />, { initialCredentials: ADO_CREDENTIALS });
     expect(document.title).toBe("Planning Hub – Monte Carlo – Data Source");
     expect(screen.getByRole("heading", { name: "Load sprint history" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Progress" }).querySelector('[aria-current="step"]')).toHaveTextContent("Input");
   });
 
   it("shows the Azure DevOps card enabled (no Coming soon badge)", () => {
-    renderAt("/monte-carlo", <DataSourcePage />);
+    renderAt("/monte-carlo", <DataSourcePage />, { initialCredentials: ADO_CREDENTIALS });
     expect(adoCard().tagName).toBe("BUTTON");
     expect(adoCard()).toBeEnabled();
     expect(adoCard()).not.toHaveAttribute("aria-disabled");
@@ -71,7 +69,7 @@ describe("DataSourcePage", () => {
   it("opens the Azure DevOps modal (iteration paths only) and Cancel returns focus to the card", async () => {
     const user = userEvent.setup();
     mockAdo();
-    renderAt("/monte-carlo", <DataSourcePage />);
+    renderAt("/monte-carlo", <DataSourcePage />, { initialCredentials: ADO_CREDENTIALS });
     await user.click(adoCard());
     const dialog = screen.getByRole("dialog", { name: "Load from Azure DevOps" });
     expect(within(dialog).getByRole("button", { name: "Load sprint history" })).toBeDisabled();
@@ -87,6 +85,7 @@ describe("DataSourcePage", () => {
     const history = makeSprintHistory({ warnings: [warning, "Only the first 20000 work items were loaded; narrow the scope."] });
     const fetchMock = mockAdo(json(history));
     renderAt("/monte-carlo", <DataSourcePage />, {
+      initialCredentials: ADO_CREDENTIALS,
       validation,
       execution: { result, sprintStartDate: "2026-01-05" },
       routes: { "/monte-carlo/input": <StoreProbe /> },
@@ -114,7 +113,6 @@ describe("DataSourcePage", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       source: "cloud",
       projectUrl: "https://dev.azure.com/org/Proj",
-      pat: "pat-value",
       iterationPath: "Proj\\Phase 1",
     });
   });
@@ -123,7 +121,7 @@ describe("DataSourcePage", () => {
     const user = userEvent.setup();
     const message = "No resolved User Stories or Bugs were found under Iteration path: Proj\\Phase 1.";
     mockAdo(json({ errors: [message] }, 422));
-    renderAt("/monte-carlo", <DataSourcePage />);
+    renderAt("/monte-carlo", <DataSourcePage />, { initialCredentials: ADO_CREDENTIALS });
     await loadFromAdo(user);
     expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent(message);
     expect(location()).toBe("/monte-carlo");
@@ -131,7 +129,7 @@ describe("DataSourcePage", () => {
 
   it("opens the Import Excel modal from the Excel card", async () => {
     const user = userEvent.setup();
-    renderAt("/monte-carlo", <DataSourcePage />);
+    renderAt("/monte-carlo", <DataSourcePage />, { initialCredentials: ADO_CREDENTIALS });
     expect(excelCard()).toHaveAttribute("aria-haspopup", "dialog");
     await user.click(excelCard());
     expect(screen.getByRole("dialog", { name: "Import an Excel file" })).toBeInTheDocument();
@@ -141,7 +139,7 @@ describe("DataSourcePage", () => {
 
   it("opens the modal from the keyboard and Cancel returns focus to the card", async () => {
     const user = userEvent.setup();
-    renderAt("/monte-carlo", <DataSourcePage />);
+    renderAt("/monte-carlo", <DataSourcePage />, { initialCredentials: ADO_CREDENTIALS });
     excelCard().focus();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -155,6 +153,7 @@ describe("DataSourcePage", () => {
   it("stores the chosen file, clears stale results and goes to the input form", async () => {
     const user = userEvent.setup();
     renderAt("/monte-carlo", <DataSourcePage />, {
+      initialCredentials: ADO_CREDENTIALS,
       validation,
       execution: { result, sprintStartDate: "2026-01-05" },
       routes: { "/monte-carlo/input": <StoreProbe /> },
@@ -171,7 +170,7 @@ describe("DataSourcePage", () => {
 
   it("keeps the modal open and stays on the page for an invalid choice", async () => {
     const user = userEvent.setup();
-    renderAt("/monte-carlo", <DataSourcePage />);
+    renderAt("/monte-carlo", <DataSourcePage />, { initialCredentials: ADO_CREDENTIALS });
     await user.click(excelCard());
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Select an .xlsx file.");
@@ -180,12 +179,12 @@ describe("DataSourcePage", () => {
 
   it("opens the How to Use help, which describes loading from Azure DevOps", async () => {
     const user = userEvent.setup();
-    renderAt("/monte-carlo", <DataSourcePage />);
+    renderAt("/monte-carlo", <DataSourcePage />, { initialCredentials: ADO_CREDENTIALS });
     await user.click(screen.getByRole("button", { name: "How to Use" }));
     const dialog = screen.getByRole("dialog", { name: "How to Use This Application" });
     expect(within(dialog).queryByText(/coming soon/i)).not.toBeInTheDocument();
     expect(within(dialog).getByText(/Work Items \(Read\)/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/never stored/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/configured in/)).toBeInTheDocument();
     expect(within(dialog).getByText(/first screen lets you choose the data source/)).toBeInTheDocument();
   });
 });

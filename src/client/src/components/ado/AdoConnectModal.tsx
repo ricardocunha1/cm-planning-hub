@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { adoConnect } from "../../lib/ado/api";
 import { loadAdoConnection, saveAdoConnection } from "../../lib/ado/connectionStorage";
 import type { AdoConnectResponse, AdoConnection, AdoScopeType, AdoScopedRequest, AdoSource } from "../../lib/ado/types";
-import { PAT_REQUIRED, PLACEHOLDER, SOURCE_LABELS, SOURCE_REQUIRED, URL_REQUIRED, validateProjectUrl } from "../../lib/ado/url";
+import { PROJECT_REQUIRED, sourceOf } from "../../lib/ado/url";
+import { useSettings } from "../../settingsStore";
 import { errorMessages } from "../Toast";
 import { useDialog } from "../useDialog";
 import { PathTree } from "./PathTree";
@@ -41,9 +42,6 @@ export interface AdoConnectModalProps<T> {
   onLoaded: (result: T, connection: AdoConnection) => void;
 }
 
-const SOURCES: readonly AdoSource[] = ["onprem", "cloud"];
-/** Source selected when there is no remembered connection. */
-const DEFAULT_SOURCE: AdoSource = "cloud";
 const SCOPE_LABELS: Readonly<Record<AdoScopeType, string>> = {
   area: "Area path",
   iteration: "Iteration path",
@@ -51,61 +49,46 @@ const SCOPE_LABELS: Readonly<Record<AdoScopeType, string>> = {
 
 const inputClass =
   "block w-full rounded border border-line-bold bg-canvas px-3 py-1.5 text-sm text-fg placeholder:text-fg-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
+const secondaryButton =
+  "rounded border border-line-bold px-3 py-1.5 text-sm font-medium text-fg-soft hover:bg-surface-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]";
 const primaryButton =
   "rounded px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-surface";
 
-/** A connection field that can be invalid before any request. */
-type ConnectionField = "source" | "url" | "pat" | "name";
+/** A field that can be invalid before any request. */
+type ConnectionField = "project" | "name";
 
 /** Inline errors plus the fields they are about (linked with `aria-invalid` / `aria-describedby`). */
 interface FormErrors {
   messages: string[];
   fields: ReadonlySet<ConnectionField>;
+  /** The errors came from a request: also hint at editing the project (its PAT) in Settings. */
+  fromRequest?: boolean;
 }
 
 const NO_ERRORS: FormErrors = { messages: [], fields: new Set() };
 
 /** Errors not tied to a field (server responses, network failures). */
-const generalErrors = (messages: string[]): FormErrors => ({ messages, fields: new Set() });
-
-/** Field-level errors before any request, in the server's order (source, URL, PAT; then the URL shape). */
-function connectionErrors(source: AdoSource | null, projectUrl: string, pat: string): FormErrors {
-  const messages: string[] = [];
-  const fields = new Set<ConnectionField>();
-  if (source === null) {
-    messages.push(SOURCE_REQUIRED);
-    fields.add("source");
-  }
-  if (!projectUrl.trim()) {
-    messages.push(URL_REQUIRED);
-    fields.add("url");
-  }
-  if (!pat.trim()) {
-    messages.push(PAT_REQUIRED);
-    fields.add("pat");
-  }
-  if (messages.length > 0 || source === null) {
-    return { messages, fields };
-  }
-  const shapeError = validateProjectUrl(source, projectUrl);
-  return shapeError ? { messages: [shapeError], fields: new Set(["url"]) } : NO_ERRORS;
-}
+const requestErrors = (messages: string[]): FormErrors => ({ messages, fields: new Set(), fromRequest: true });
 
 /**
- * Connects to an Azure DevOps project and loads data for one of its paths;
- * shared by the ADO-backed tools (Release Plan board creation, Monte Carlo
- * sprint history). Step 1: source (On-Prem / Collaboration Hub; defaults to
- * Collaboration Hub unless a remembered connection says otherwise), project URL and PAT, then **Connect** (URL shape checked client-side first; on
- * success the connection — never the PAT — is remembered under
- * `connectionKey`). Step 2: a {@link PathTree} of the `scopeTypes` tree (with an
- * "Area path" / "Iteration path" toggle when there are two); the submit button
- * calls `load` and hands its result to `onLoaded`. Editing the source, URL or
- * PAT after Connect clears the trees (Connect again); the path picker is
- * disabled while a request runs. With a `nameField`, a required name input
- * (pre-filled from the project name after Connect) is validated before `load`. Errors show inline (invalid fields point at
- * them with `aria-invalid` / `aria-describedby`) and the modal stays open. The
- * PAT lives only in this component's state; its input opts out of password
- * managers.
+ * Connects to one of the user's Azure DevOps projects (the ones stored in
+ * Settings) and loads data for one of its paths; shared by the ADO-backed
+ * tools (Release Plan board creation, Monte Carlo sprint history). Step 1: pick
+ * a project from a "Project" list (name; its URL shown below) and press
+ * **Connect**. The request carries the stored credential's project URL and the
+ * source inferred from its host, never a PAT: the server uses the PAT stored
+ * for the signed-in user. The list loads with the settings store (loading and
+ * retry states); with no project a message and an "Open settings" button are
+ * shown and Connect stays disabled. The last connected project is remembered
+ * under `connectionKey` (by URL; ignored when it no longer exists). Step 2: a
+ * {@link PathTree} of the `scopeTypes` tree (with an "Area path" / "Iteration
+ * path" toggle when there are two); the submit button calls `load` and hands its
+ * result to `onLoaded`. Changing the project after Connect clears the trees
+ * (Connect again); the path picker is disabled while a request runs. With a
+ * `nameField`, a required name input (pre-filled from the project name after
+ * Connect) is validated before `load`. Errors show inline (invalid fields point
+ * at them with `aria-invalid` / `aria-describedby`; request errors add a hint
+ * to edit the project in Settings) and the modal stays open.
  */
 export function AdoConnectModal<T>({ open, ...props }: AdoConnectModalProps<T>) {
   return open ? <AdoConnectDialog {...props} /> : null;
@@ -122,20 +105,25 @@ function AdoConnectDialog<T>({
   onLoaded,
 }: Omit<AdoConnectModalProps<T>, "open">) {
   const titleId = useId();
-  const urlId = useId();
-  const patId = useId();
-  const patHelpId = useId();
+  const projectId = useId();
+  const projectUrlId = useId();
   const errorId = useId();
   const nameId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  const { items, status, ensureLoaded, load: reloadProjects, openSettings, settingsOpen } = useSettings();
+  const selectRef = useRef<HTMLSelectElement>(null);
   const [prefill] = useState(() => loadAdoConnection(connectionKey));
-  // `null` (SOURCE_REQUIRED) is kept as a defensive state; the UI always starts with a source.
-  const [source, setSource] = useState<AdoSource | null>(prefill?.source ?? DEFAULT_SOURCE);
-  const [projectUrl, setProjectUrl] = useState(prefill?.projectUrl ?? "");
-  const [pat, setPat] = useState("");
-  const [connected, setConnected] = useState<{ source: AdoSource; response: AdoConnectResponse } | null>(null);
+  // The user's pick (`null` = the empty option); until they pick, the remembered project (by URL) is selected.
+  const [pick, setPick] = useState<{ id: number | null } | null>(null);
+  const [connectedState, setConnectedState] = useState<{
+    source: AdoSource;
+    response: AdoConnectResponse;
+    /** The Settings entry (id and URL) the Connect was made for. */
+    projectId: number;
+    requestUrl: string;
+  } | null>(null);
   const [scopeType, setScopeType] = useState<AdoScopeType>(scopeTypes[0]);
   const [scopePath, setScopePath] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -143,6 +131,39 @@ function AdoConnectDialog<T>({
   const [errors, setErrors] = useState<FormErrors>(NO_ERRORS);
 
   useDialog({ open: true, onClose, dialogRef });
+
+  useEffect(() => {
+    void ensureLoaded();
+  }, [ensureLoaded]);
+
+  const selected =
+    (pick ? items.find((item) => item.id === pick.id) : prefill ? items.find((item) => item.projectUrl === prefill.projectUrl) : undefined) ?? null;
+
+  // The connection only counts while its project is still selected with the same URL (Settings may delete or edit it meanwhile).
+  const connected =
+    connectedState && selected && selected.id === connectedState.projectId && selected.projectUrl.trim() === connectedState.requestUrl
+      ? connectedState
+      : null;
+  const stale = connectedState !== null && connected === null;
+  useEffect(() => {
+    if (stale) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      setBusy(null);
+      setConnectedState(null);
+      setScopePath(null);
+    }
+  }, [stale]);
+
+  // When Settings closes, focus may have been lost with the unmounted "Open settings" button: move it into this dialog.
+  const wasSettingsOpen = useRef(settingsOpen);
+  useEffect(() => {
+    const closed = wasSettingsOpen.current && !settingsOpen;
+    wasSettingsOpen.current = settingsOpen;
+    if (closed && !dialogRef.current?.contains(document.activeElement)) {
+      (selectRef.current ?? dialogRef.current)?.focus();
+    }
+  }, [settingsOpen]);
 
   // Abort whatever is in flight when the modal closes (unmounts).
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -159,7 +180,7 @@ function AdoConnectDialog<T>({
     abortRef.current?.abort();
     abortRef.current = null;
     setBusy(null);
-    setConnected(null);
+    setConnectedState(null);
     setScopePath(null);
     setErrors(NO_ERRORS);
   };
@@ -169,27 +190,28 @@ function AdoConnectDialog<T>({
     if (busy) {
       return;
     }
-    const fieldErrors = connectionErrors(source, projectUrl, pat);
-    if (fieldErrors.messages.length > 0 || source === null) {
-      setErrors(fieldErrors);
+    if (!selected) {
+      setErrors({ messages: [PROJECT_REQUIRED], fields: new Set(["project"]) });
       return;
     }
+    const projectUrl = selected.projectUrl.trim();
+    const source = sourceOf(projectUrl);
     const controller = startRequest();
     setErrors(NO_ERRORS);
     setBusy("connect");
     try {
-      const response = await adoConnect({ source, projectUrl: projectUrl.trim(), pat }, controller.signal);
+      const response = await adoConnect({ source, projectUrl }, controller.signal);
       if (controller.signal.aborted) {
         return;
       }
-      saveAdoConnection(connectionKey, { source, projectUrl: response.projectUrl });
-      setConnected({ source, response });
+      saveAdoConnection(connectionKey, { source, projectUrl: selected.projectUrl });
+      setConnectedState({ source, response, projectId: selected.id, requestUrl: projectUrl });
       setName(nameField ? nameField.defaultName(response.project.name) : "");
       setScopePath(null);
       setBusy(null);
     } catch (exc) {
       if (!controller.signal.aborted) {
-        setErrors(generalErrors(errorMessages(exc)));
+        setErrors(requestErrors(errorMessages(exc)));
         setBusy(null);
       }
     }
@@ -215,7 +237,7 @@ function AdoConnectDialog<T>({
     setErrors(NO_ERRORS);
     setBusy("load");
     try {
-      const result = await load({ ...connection, pat }, controller.signal, trimmedName);
+      const result = await load(connection, controller.signal, trimmedName);
       if (controller.signal.aborted) {
         return;
       }
@@ -223,7 +245,7 @@ function AdoConnectDialog<T>({
       onLoaded(result, connection);
     } catch (exc) {
       if (!controller.signal.aborted) {
-        setErrors(generalErrors(errorMessages(exc)));
+        setErrors(requestErrors(errorMessages(exc)));
         setBusy(null);
       }
     }
@@ -248,7 +270,8 @@ function AdoConnectDialog<T>({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative flex max-h-full w-full max-w-2xl flex-col rounded-lg border border-line-strong bg-surface shadow-xl"
+        tabIndex={-1}
+        className="relative flex max-h-full focus:outline-none w-full max-w-2xl flex-col rounded-lg border border-line-strong bg-surface shadow-xl"
       >
         <div className="px-6 py-4 border-b border-line">
           <h2 id={titleId} className="text-lg font-semibold">
@@ -257,71 +280,58 @@ function AdoConnectDialog<T>({
         </div>
         <div className="space-y-4 overflow-y-auto px-6 py-5 text-sm">
           <form onSubmit={(event) => void onConnect(event)} noValidate className="space-y-4">
-            <fieldset aria-describedby={errors.fields.has("source") ? errorId : undefined}>
-              <legend className="mb-1 font-medium text-fg-soft">Azure DevOps source</legend>
-              <div className="flex flex-wrap gap-4">
-                {SOURCES.map((value) => (
-                  <label key={value} className="flex items-center gap-2 text-fg-soft">
-                    <input
-                      type="radio"
-                      name="ado-source"
-                      value={value}
-                      checked={source === value}
-                      onChange={() => {
-                        setSource(value);
-                        setProjectUrl("");
-                        editConnection();
-                      }}
-                      className="accent-[color:var(--cm-light-blue)]"
-                    />
-                    {SOURCE_LABELS[value]}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
             <div className="space-y-1">
-              <label htmlFor={urlId} className="block font-medium text-fg-soft">
-                Project URL
+              <label htmlFor={projectId} className="block font-medium text-fg-soft">
+                Project
               </label>
-              <input
-                id={urlId}
-                type="url"
-                value={projectUrl}
-                placeholder={PLACEHOLDER[source ?? DEFAULT_SOURCE]}
-                onChange={(event) => {
-                  setProjectUrl(event.target.value);
-                  editConnection();
-                }}
-                spellCheck={false}
-                {...invalidProps("url")}
-                className={inputClass}
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor={patId} className="block font-medium text-fg-soft">
-                Personal Access Token
-              </label>
-              <input
-                id={patId}
-                type="password"
-                autoComplete="off"
-                data-1p-ignore="true"
-                data-lpignore="true"
-                data-form-type="other"
-                value={pat}
-                onChange={(event) => {
-                  setPat(event.target.value);
-                  editConnection();
-                }}
-                {...invalidProps("pat", patHelpId)}
-                className={inputClass}
-              />
-              <p id={patHelpId} className="text-xs text-fg-subtle">
-                Needs the Work Items (Read) scope. It is sent only to connect and is never stored.
-              </p>
+              {status === "idle" || status === "loading" ? (
+                <p role="status" className="text-fg-muted">
+                  Loading projects…
+                </p>
+              ) : status === "error" ? (
+                <div className="flex items-center gap-3 text-danger">
+                  <p>Could not load your projects.</p>
+                  <button type="button" onClick={() => void reloadProjects()} className={secondaryButton}>
+                    Retry
+                  </button>
+                </div>
+              ) : items.length === 0 ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-fg-muted">No Azure DevOps projects configured yet.</p>
+                  <button type="button" onClick={openSettings} className={secondaryButton}>
+                    Open settings
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <select
+                    id={projectId}
+                    ref={selectRef}
+                    value={selected?.id ?? ""}
+                    onChange={(event) => {
+                      setPick({ id: event.target.value === "" ? null : Number(event.target.value) });
+                      editConnection();
+                    }}
+                    {...invalidProps("project", selected ? projectUrlId : undefined)}
+                    className={inputClass}
+                  >
+                    <option value="">Select a project…</option>
+                    {items.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.projectName}
+                      </option>
+                    ))}
+                  </select>
+                  {selected && (
+                    <p id={projectUrlId} className="break-all text-xs text-fg-subtle">
+                      {selected.projectUrl}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
             <div className="flex items-center gap-3">
-              <button type="submit" disabled={busy !== null} className={primaryButton} style={{ backgroundColor: "var(--cm-light-blue)" }}>
+              <button type="submit" disabled={busy !== null || status !== "ready" || items.length === 0} className={primaryButton} style={{ backgroundColor: "var(--cm-light-blue)" }}>
                 {busy === "connect" ? "Connecting…" : "Connect"}
               </button>
               {connected && (
@@ -397,6 +407,15 @@ function AdoConnectDialog<T>({
                 <p key={message}>{message}</p>
               ))}
             </div>
+          )}
+          {errors.fromRequest && (
+            <p className="text-xs text-fg-subtle">
+              If the Personal Access Token is missing or expired, edit the project in{" "}
+              <button type="button" onClick={openSettings} className="underline hover:text-fg-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cm-light-blue)]">
+                Settings
+              </button>
+              .
+            </p>
           )}
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-line">

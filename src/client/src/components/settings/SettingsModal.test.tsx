@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CREDENTIALS } from "../../test/settingsFixtures";
 import { SignedIn } from "../../test/SignedIn";
 import { NAME_REQUIRED, SettingsModal } from "./SettingsModal";
-import { CLOUD_SHAPE, HTTPS_REQUIRED, ONPREM_SHAPE, PAT_REQUIRED, URL_REQUIRED } from "../../lib/ado/url";
+import { PAT_REQUIRED_URL_CHANGED } from "./SettingsModal";
+import { CLOUD_SHAPE, HTTPS_REQUIRED, ONPREM_SHAPE, PAT_REQUIRED, PLACEHOLDER, URL_REQUIRED } from "../../lib/ado/url";
 
 const SECRET = "super-secret-pat-123";
 
@@ -26,7 +27,7 @@ function stubApi({ items = CREDENTIALS, failWrites = false }: { items?: typeof C
       return Promise.resolve(new Response(null, { status: 204 }));
     }
     const body = JSON.parse(init?.body as string) as { projectName: string; projectUrl: string };
-    return Promise.resolve(json({ id: method === "POST" ? 9 : 1, projectName: body.projectName, projectUrl: body.projectUrl, hasPat: true }, method === "POST" ? 201 : 200));
+    return Promise.resolve(json({ id: method === "POST" ? 9 : 1, projectName: body.projectName, projectUrl: body.projectUrl, hasPat: true, patLast4: null }, method === "POST" ? 201 : 200));
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -86,8 +87,11 @@ describe("SettingsModal", () => {
     renderModal();
     await screen.findByText("Alpha");
     expect(screen.getByText("https://dev.azure.com/org/Alpha")).toBeInTheDocument();
-    expect(screen.getAllByText("PAT saved")).toHaveLength(2);
-    expect(screen.getAllByText("••••••••")).toHaveLength(2);
+    // Alpha shows the dots plus its last 4 characters; Beta (none) only the dots. No "PAT saved" text.
+    expect(screen.getByRole("img", { name: "Personal Access Token ending in 1a2b" })).toHaveTextContent("•••••••• 1a2b");
+    expect(screen.getByRole("img", { name: "Personal Access Token saved" })).toHaveTextContent(/^••••••••$/);
+    expect(screen.queryByText(/PAT saved/)).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(SECRET);
     expect(screen.queryByDisplayValue(/./)).not.toBeInTheDocument();
   });
 
@@ -208,7 +212,7 @@ describe("SettingsModal", () => {
       await userEvent.type(screen.getByLabelText("Personal Access Token"), SECRET);
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
       expect(await screen.findByRole("button", { name: "Saving…" })).toBeDisabled();
-      resolve(json({ id: 9, projectName: "Gamma", projectUrl: "https://dev.azure.com/o/Gamma", hasPat: true }, 201));
+      resolve(json({ id: 9, projectName: "Gamma", projectUrl: "https://dev.azure.com/o/Gamma", hasPat: true, patLast4: null }, 201));
       await waitFor(() => expect(screen.queryByRole("form")).not.toBeInTheDocument());
     });
 
@@ -221,6 +225,44 @@ describe("SettingsModal", () => {
       expect(screen.queryByRole("form")).not.toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: "Add project" }));
       expect(screen.getByLabelText("Personal Access Token")).toHaveValue("");
+    });
+  });
+
+  describe("Azure DevOps source", () => {
+    const CLOUD_PH = "https://dev.azure.com/<ORGANIZATION>/<PROJECT_NAME>";
+
+    it("defaults to Collaboration Hub when adding and only changes the URL placeholder", async () => {
+      const fetchMock = stubApi();
+      renderModal();
+      await screen.findByText("Alpha");
+      await userEvent.click(screen.getByRole("button", { name: "Add project" }));
+      const group = screen.getByRole("group", { name: "Azure DevOps source" });
+      expect(within(group).getByRole("radio", { name: "Collaboration Hub" })).toBeChecked();
+      expect(screen.getByLabelText("Project URL")).toHaveAttribute("placeholder", CLOUD_PH);
+      await userEvent.click(within(group).getByRole("radio", { name: "On-Prem" }));
+      expect(screen.getByLabelText("Project URL")).toHaveAttribute("placeholder", PLACEHOLDER.onprem);
+      await userEvent.type(screen.getByLabelText("Project name"), "Gamma");
+      await userEvent.type(screen.getByLabelText("Project URL"), "https://tfs.example.com/Col/Gamma");
+      await userEvent.type(screen.getByLabelText("Personal Access Token"), SECRET);
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
+      expect(JSON.parse(writes(fetchMock)[0][1]?.body as string)).toEqual({
+        projectName: "Gamma",
+        projectUrl: "https://tfs.example.com/Col/Gamma",
+        pat: SECRET,
+      });
+    });
+
+    it("infers the source from the URL host when editing", async () => {
+      stubApi();
+      renderModal();
+      await screen.findByText("Alpha");
+      await userEvent.click(screen.getByRole("button", { name: "Edit Alpha" }));
+      expect(screen.getByRole("radio", { name: "Collaboration Hub" })).toBeChecked();
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await userEvent.click(screen.getByRole("button", { name: "Edit Beta" }));
+      expect(screen.getByRole("radio", { name: "On-Prem" })).toBeChecked();
+      expect(screen.getByLabelText("Project URL")).toHaveAttribute("placeholder", PLACEHOLDER.onprem);
     });
   });
 
@@ -269,6 +311,37 @@ describe("SettingsModal", () => {
       expect(document.body.innerHTML).not.toContain(SECRET);
     });
 
+    it("asks for the PAT again when the URL changes, and blocks Save", async () => {
+      const fetchMock = stubApi();
+      renderModal();
+      await openEdit();
+      expect(screen.getByText(/Leave blank to keep the saved PAT/)).toBeInTheDocument();
+      const url = screen.getByLabelText("Project URL");
+      await userEvent.clear(url);
+      await userEvent.type(url, "https://dev.azure.com/org/Other");
+      expect(screen.getByText(new RegExp(PAT_REQUIRED_URL_CHANGED))).toBeInTheDocument();
+      expect(screen.queryByText(/Leave blank to keep/)).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      expect(screen.getByRole("alert")).toHaveTextContent(PAT_REQUIRED_URL_CHANGED);
+      expect(screen.getByLabelText("Personal Access Token")).toHaveAttribute("aria-invalid", "true");
+      expect(writes(fetchMock)).toHaveLength(0);
+      await userEvent.type(screen.getByLabelText("Personal Access Token"), SECRET);
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
+    });
+
+    it("does not ask for the PAT when only case or a trailing slash of the URL changes", async () => {
+      const fetchMock = stubApi();
+      renderModal();
+      await openEdit();
+      const url = screen.getByLabelText("Project URL");
+      await userEvent.clear(url);
+      await userEvent.type(url, "https://DEV.azure.com/org/alpha/");
+      expect(screen.queryByText(PAT_REQUIRED_URL_CHANGED)).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
+    });
+
     it("still validates name and URL", async () => {
       stubApi();
       renderModal();
@@ -284,6 +357,16 @@ describe("SettingsModal", () => {
   });
 
   describe("delete", () => {
+    it("renders the delete button as a red icon button that inverts on hover", async () => {
+      stubApi();
+      renderModal();
+      await screen.findByText("Alpha");
+      const button = screen.getByRole("button", { name: "Delete Alpha" });
+      expect(button).toHaveAttribute("title", "Delete Alpha");
+      expect(button).toHaveTextContent("");
+      expect(button).toHaveClass("text-danger", "border-danger", "bg-transparent", "hover:bg-danger", "hover:text-white");
+    });
+
     it("asks for confirmation (stacked over the modal) and DELETEs the entry", async () => {
       const fetchMock = stubApi();
       renderModal();

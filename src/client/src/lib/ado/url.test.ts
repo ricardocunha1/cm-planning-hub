@@ -7,6 +7,8 @@ import {
   PLACEHOLDER,
   SOURCE_REQUIRED,
   URL_REQUIRED,
+  sameProjectUrl,
+  sourceOf,
   validateProjectUrl,
 } from "./url";
 
@@ -155,5 +157,35 @@ describe("validateProjectUrl: errors", () => {
     ])("%s", (path) => {
       expect(validateProjectUrl(source, `https://${host}${path}`)).toBe(shape);
     });
+  });
+});
+
+describe("sourceOf", () => {
+  it.each([
+    ["https://dev.azure.com/org/Proj", "cloud"],
+    ["https://org.visualstudio.com/Proj", "cloud"],
+    ["  HTTPS://DEV.AZURE.COM/org/Proj  ", "cloud"],
+    ["https://tfs.example.com/Collection/Proj", "onprem"],
+    ["https://evil.example.com/dev.azure.com/Proj", "onprem"],
+    ["https://notdev.azure.com.example.com/a/b", "onprem"],
+    ["https://sub.dev.azure.com/org/Proj", "onprem"],
+    ["https://a.b.visualstudio.com/Proj", "onprem"],
+    ["https://visualstudio.com/Proj", "onprem"],
+    ["https://org.visualstudio.com:443/Proj", "cloud"],
+    ["https://DEV.azure.com:8443/org/Proj", "cloud"],
+    ["http://dev.azure.com/org/Proj", "onprem"],
+    ["not a url", "onprem"],
+  ] as const)("%s -> %s", (url, source) => {
+    expect(sourceOf(url)).toBe(source);
+  });
+});
+
+describe("sameProjectUrl", () => {
+  it("ignores case, surrounding whitespace and trailing slashes", () => {
+    expect(sameProjectUrl("https://dev.azure.com/Org/Proj", " https://dev.azure.com/org/proj/ ")).toBe(true);
+  });
+
+  it("tells different projects apart", () => {
+    expect(sameProjectUrl("https://dev.azure.com/org/A", "https://dev.azure.com/org/B")).toBe(false);
   });
 });

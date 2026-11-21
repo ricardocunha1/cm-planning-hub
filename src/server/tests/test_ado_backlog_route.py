@@ -563,7 +563,6 @@ def test_backlog_all_fields_missing_reports_every_message(ado_client, fake):
     assert _errors(ado_client.post("/api/ado/backlog", json={})) == [
         "Choose the Azure DevOps source (On-Prem or Collaboration Hub).",
         "Enter the Azure DevOps project URL.",
-        "Enter a Personal Access Token.",
         "Choose an Area path or an Iteration path.",
     ]
     assert fake.requests == []
@@ -602,7 +601,7 @@ def test_backlog_missing_scope_keys(ado_client, fake):
     [
         ({"source": "azure"}, "Choose the Azure DevOps source (On-Prem or Collaboration Hub)."),
         ({"projectUrl": " "}, "Enter the Azure DevOps project URL."),
-        ({"pat": None}, "Enter a Personal Access Token."),
+        ({"pat": None}, "A Personal Access Token is required: enter one, or save one for this project in Settings."),
         ({"projectUrl": "http://dev.azure.com/contoso/P"}, "The URL must start with https://."),
         ({"projectUrl": "https://dev.azure.com/contoso"}, "Collaboration Hub URLs look like https://dev.azure.com/<organization>/<project>."),
         (
@@ -621,7 +620,7 @@ def test_backlog_connection_errors_make_no_request(ado_client, fake, overrides, 
 @pytest.mark.parametrize("content", [b"not json", b"[1]", b"", b"null"])
 def test_backlog_unreadable_body_reports_field_messages(ado_client, content):
     response = ado_client.post("/api/ado/backlog", content=content, headers={"Content-Type": "application/json"})
-    assert len(_errors(response)) == 4
+    assert len(_errors(response)) == 3
 
 
 # --- 422: unknown scope path ----------------------------------------------------------

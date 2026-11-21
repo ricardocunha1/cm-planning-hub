@@ -6,6 +6,8 @@ export interface AdoCredential {
   projectUrl: string;
   /** Whether a PAT is stored (always true for items the server returns today). */
   hasPat: boolean;
+  /** Last 4 characters of the stored PAT; `null` when unavailable. Nothing else of the PAT is returned. */
+  patLast4: string | null;
 }
 
 /** GET /api/settings/ado-credentials response. */
