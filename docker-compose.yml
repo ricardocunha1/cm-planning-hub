@@ -9,6 +9,10 @@ services:
       POSTGRES_DB: planninghub
     ports:
       - "5432:5432"
+    # Persist the database in a named volume so boards survive
+    # `docker compose down`; `docker compose down -v` deletes it.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U planninghub -d planninghub"]
       interval: 5s
@@ -56,3 +60,6 @@ services:
     depends_on:
       server:
         condition: service_healthy
+
+volumes:
+  pgdata:

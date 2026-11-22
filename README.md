@@ -233,6 +233,7 @@ from the Secret `cm-planning-hub-auth-secret`):
 cp .env.example .env             # fill in the credentials, SESSION_SECRET and PAT_ENCRYPTION_KEY
 docker compose up --build        # http://localhost:8080
 docker compose down
+docker compose down -v           # deletes the volumes (database)
 ```
 
 The client container listens on 8080 (non-root nginx) and reaches the
