@@ -11,6 +11,8 @@ adoDescriptionMaxChars: 2000
 # PostgreSQL for Release Plan persistence.
 postgres:
   image: postgres:17
+  # Size of the PersistentVolumeClaim (ReadWriteOnce) that holds the database data.
+  storage: 10Gi
   # Credentials come from an existing Secret that this chart does NOT create.
   # Create it in the namespace before installing, e.g.:
   #   oc -n cm-planning-hub create secret generic cm-planning-hub-db-secret \

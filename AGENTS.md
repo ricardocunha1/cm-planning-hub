@@ -87,13 +87,15 @@ in `src/client/src/lib/tools.ts`):
   → 8080 / 8000).
 - `cm-planning-hub-db-deployment` / `-service`: PostgreSQL for Release Plan persistence. Its ClusterIP Service exposes
   port 5432 inside the cluster only; the ingress does not route to it.
+  Data lives on `cm-planning-hub-db-pvc` (ReadWriteOnce, `postgres.storage`,
+  default `10Gi`).
 - `cm-planning-hub-ingress` routes `/api` → server and `/` → client at
   `public_http_address`.
 - `values.yaml`: registry `dev.criticalmanufacturing.io`, image names, one
   shared `tag` for both images, `adoAllowedHosts` (passed to the server as
   `ADO_ALLOWED_HOSTS`), `adoDescriptionMaxChars` (`ADO_DESCRIPTION_MAX_CHARS`),
-  `postgres` (database image and the Secret that holds
-  its credentials).
+  `postgres` (database image, PVC size and the Secret that
+  holds its credentials).
 
 Both images run as non-root (OpenShift). Releases are built by the manual
 **Deploy** GitHub workflow (`.github/workflows/deploy.yml`): GitVersion tag →
