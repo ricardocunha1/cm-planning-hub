@@ -9,7 +9,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
+FROM nginxinc/nginx-unprivileged:alpine
 
 # Rendered by the image entrypoint (envsubst) into conf.d/default.conf.
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
